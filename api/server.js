@@ -210,17 +210,86 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ═══════════════════════════════════════════════════
+  //  WebRTC Signaling — DJ audio broadcast to listeners
+  // ═══════════════════════════════════════════════════
+
+  // DJ goes live  → store DJ socket, notify listeners
+  socket.on("dj-go-live", ({ roomId }) => {
+    if (!rooms[roomId]) rooms[roomId] = { dj: null, listeners: new Map() };
+    rooms[roomId].dj = { socketId: socket.id, identity: socket.data?.identity };
+    socket.to(roomId).emit("dj-live", { dj: socket.data?.identity });
+    console.log(`[WebRTC] DJ ${socket.data?.identity} went live in ${roomId}`);
+  });
+
+  // DJ stops broadcast
+  socket.on("dj-stop-live", ({ roomId }) => {
+    if (rooms[roomId]?.dj?.socketId === socket.id) {
+      rooms[roomId].dj = null;
+    }
+    socket.to(roomId).emit("dj-offline");
+    console.log(`[WebRTC] DJ ${socket.data?.identity} stopped in ${roomId}`);
+  });
+
+  // Listener requests a connection to DJ
+  socket.on("listener-request", ({ roomId }) => {
+    const room = rooms[roomId];
+    if (room?.dj) {
+      // Tell the DJ that this listener wants audio
+      io.to(room.dj.socketId).emit("listener-joined", {
+        listenerId: socket.id,
+        identity: socket.data?.identity,
+      });
+      console.log(`[WebRTC] Listener ${socket.data?.identity} requesting stream from DJ in ${roomId}`);
+    } else {
+      socket.emit("no-dj", { message: "No DJ is live in this room" });
+    }
+  });
+
+  // WebRTC offer from DJ → specific listener
+  socket.on("webrtc-offer", ({ listenerId, offer }) => {
+    io.to(listenerId).emit("webrtc-offer", {
+      djId: socket.id,
+      offer,
+    });
+  });
+
+  // WebRTC answer from listener → DJ
+  socket.on("webrtc-answer", ({ djId, answer }) => {
+    io.to(djId).emit("webrtc-answer", {
+      listenerId: socket.id,
+      answer,
+    });
+  });
+
+  // ICE candidates (bidirectional relay)
+  socket.on("webrtc-ice", ({ targetId, candidate }) => {
+    io.to(targetId).emit("webrtc-ice", {
+      fromId: socket.id,
+      candidate,
+    });
+  });
+
   // ── Disconnect ──
   socket.on("disconnect", () => {
     const { roomId, identity } = socket.data || {};
     if (roomId && rooms[roomId]) {
       rooms[roomId].listeners.delete(socket.id);
-      if (rooms[roomId].dj?.socketId === socket.id) rooms[roomId].dj = null;
+      if (rooms[roomId].dj?.socketId === socket.id) {
+        rooms[roomId].dj = null;
+        // Notify listeners that DJ disconnected
+        io.to(roomId).emit("dj-offline");
+      }
 
       io.to(roomId).emit("participants", {
         count: rooms[roomId].listeners.size,
         dj: rooms[roomId].dj?.identity || null,
       });
+
+      // Notify DJ that this listener left (so DJ can close peer connection)
+      if (rooms[roomId]?.dj) {
+        io.to(rooms[roomId].dj.socketId).emit("listener-left", { listenerId: socket.id });
+      }
 
       // Cleanup empty rooms
       if (rooms[roomId].listeners.size === 0) delete rooms[roomId];

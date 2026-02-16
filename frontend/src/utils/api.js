@@ -28,7 +28,7 @@ export async function api(path, options = {}) {
   if (token) headers.Authorization = "Bearer " + token;
 
   const res = await fetch(API + path, { ...options, headers });
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     clearToken();
     window.location.href = "/login";
     throw new Error("Unauthorized");

@@ -1,38 +1,53 @@
-import React, { useState, useRef, useEffect } from "react";
-import { api, getUser } from "../utils/api";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { getUser } from "../utils/api";
 import useDJStore from "../store/djStore";
 import { getStreamDestination, getMasterAnalyser, resumeAudio } from "../engine";
-import { joinRoom, emitEnergy } from "../utils/socket";
+import { joinRoom, emitEnergy, getSocket } from "../utils/socket";
 
+/**
+ * Broadcast — DJ goes live via WebRTC (peer-to-peer audio).
+ *
+ * Flow:
+ *   1. DJ opens page, joins Socket.IO room as "dj"
+ *   2. DJ clicks "Go Live" → captures master audio bus as MediaStream
+ *   3. Socket.IO signals "dj-go-live" → server notifies listeners
+ *   4. When a listener connects, server sends "listener-joined" to DJ
+ *   5. DJ creates RTCPeerConnection per listener, adds audio track, sends offer
+ *   6. Listener answers → ICE completes → audio streams peer-to-peer
+ */
 export default function Broadcast() {
   const user = getUser();
   const canvasRef = useRef(null);
 
-  const [connected, setConnected] = useState(false);
-  const [tokenInfo, setTokenInfo] = useState(null);
-  const [status, setStatus] = useState("");
+  const [isLive, setIsLive] = useState(false);
+  const [status, setStatus] = useState("Ready — play some decks in the Mixer, then Go Live here.");
   const [energy, setEnergy] = useState(0);
   const [listeners, setListeners] = useState(0);
-  const [demoMode, setDemoMode] = useState(false);
+  const [listenerList, setListenerList] = useState([]);
 
   const isDJ = user?.role === "dj" || user?.role === "admin";
-  const roomRef = useRef(null);
+  const roomId = "dj-room";
+  const peersRef = useRef(new Map());
+  const streamRef = useRef(null);
+  const liveRef = useRef(false);
 
   const setAudioEnergy = useDJStore((s) => s.setAudioEnergy);
 
   // ── Join Socket.IO room on mount ──
   useEffect(() => {
     const identity = user?.username || "broadcaster-" + Date.now();
-    joinRoom("dj-room", identity, "dj");
+    joinRoom(roomId, identity, "dj");
   }, []);
 
-  // ── Draw audio energy from master analyser ──
+  // ── Draw master audio spectrum ──
   useEffect(() => {
     let running = true;
+    let frameCount = 0;
 
     const draw = () => {
       if (!running) return;
       requestAnimationFrame(draw);
+      frameCount++;
 
       try {
         const analyser = getMasterAnalyser();
@@ -46,15 +61,14 @@ export default function Broadcast() {
         setEnergy(avg);
         setAudioEnergy(avg);
 
-        // Emit energy over Socket.IO every few frames
-        if (Math.random() < 0.1) emitEnergy(avg);
+        if (frameCount % 10 === 0) emitEnergy(avg);
 
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const canvasCtx = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d");
 
-        canvasCtx.fillStyle = "#0a0a12";
-        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#0a0a12";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         const barWidth = (canvas.width / bufferLength) * 2.5;
         let x = 0;
@@ -62,128 +76,167 @@ export default function Broadcast() {
           const barHeight = (dataArray[i] / 255) * canvas.height;
           const r = dataArray[i] + 25;
           const g = 250 - dataArray[i];
-          canvasCtx.fillStyle = `rgb(${r},${g},50)`;
-          canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 1, barHeight);
+          ctx.fillStyle = `rgb(${r},${g},50)`;
+          ctx.fillRect(x, canvas.height - barHeight, barWidth - 1, barHeight);
           x += barWidth;
         }
 
-        // Energy meter
-        canvasCtx.fillStyle = avg > 0.6 ? "#ff3300" : avg > 0.3 ? "#ff9800" : "#00f0ff";
-        canvasCtx.fillRect(0, 0, canvas.width * avg, 4);
+        ctx.fillStyle = avg > 0.6 ? "#ff3300" : avg > 0.3 ? "#ff9800" : "#00f0ff";
+        ctx.fillRect(0, 0, canvas.width * avg, 4);
       } catch {}
     };
     draw();
-
     return () => { running = false; };
   }, []);
 
-  // Request LiveKit token from API
-  const requestToken = async () => {
-    setStatus("Requesting token...");
-    try {
-      const res = await api("/livekit/token?room=dj-room");
-      if (res.ok) {
-        const data = await res.json();
-        setTokenInfo(data);
-        setStatus(data.mock ? "Mock token received (install livekit-server-sdk for real tokens)" : "Token received!");
-      } else {
-        setStatus("Failed to get token");
-      }
-    } catch (e) {
-      setStatus("API error: " + e.message);
-    }
-  };
+  // ── Create a peer connection for one listener ──
+  const createPeerForListener = useCallback((listenerId, identity) => {
+    if (peersRef.current.has(listenerId)) return;
+    const socket = getSocket();
+    const stream = streamRef.current;
+    if (!stream) return;
 
-  // Connect to LiveKit and publish master audio stream from audioEngine
-  const connectLiveKit = async () => {
-    if (!tokenInfo) {
-      setStatus("Get a token first!");
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+      ],
+    });
+
+    stream.getAudioTracks().forEach((track) => {
+      pc.addTrack(track, stream);
+    });
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        socket.emit("webrtc-ice", { targetId: listenerId, candidate: e.candidate });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === "connected") {
+        setStatus(`🔴 LIVE — streaming to ${peersRef.current.size} listener(s)`);
+      }
+      if (state === "disconnected" || state === "failed" || state === "closed") {
+        peersRef.current.delete(listenerId);
+        setListenerList((prev) => prev.filter((l) => l.id !== listenerId));
+        setListeners(peersRef.current.size);
+        if (liveRef.current) {
+          setStatus(`🔴 LIVE — streaming to ${peersRef.current.size} listener(s)`);
+        }
+      }
+    };
+
+    peersRef.current.set(listenerId, pc);
+    setListenerList((prev) => [...prev, { id: listenerId, identity }]);
+    setListeners(peersRef.current.size);
+
+    pc.createOffer()
+      .then((offer) => pc.setLocalDescription(offer))
+      .then(() => {
+        socket.emit("webrtc-offer", { listenerId, offer: pc.localDescription });
+      })
+      .catch((err) => console.error("[WebRTC] Offer error:", err));
+  }, []);
+
+  // ── Socket.IO listeners for WebRTC signaling ──
+  useEffect(() => {
+    const socket = getSocket();
+
+    const onListenerJoined = ({ listenerId, identity }) => {
+      if (!liveRef.current) return;
+      console.log(`[Broadcast] Listener wants stream: ${identity}`);
+      createPeerForListener(listenerId, identity);
+    };
+
+    const onAnswer = ({ listenerId, answer }) => {
+      const pc = peersRef.current.get(listenerId);
+      if (pc && pc.signalingState === "have-local-offer") {
+        pc.setRemoteDescription(new RTCSessionDescription(answer)).catch(console.error);
+      }
+    };
+
+    const onIce = ({ fromId, candidate }) => {
+      const pc = peersRef.current.get(fromId);
+      if (pc) {
+        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      }
+    };
+
+    const onListenerLeft = ({ listenerId }) => {
+      const pc = peersRef.current.get(listenerId);
+      if (pc) {
+        pc.close();
+        peersRef.current.delete(listenerId);
+        setListenerList((prev) => prev.filter((l) => l.id !== listenerId));
+        setListeners(peersRef.current.size);
+      }
+    };
+
+    socket.on("listener-joined", onListenerJoined);
+    socket.on("webrtc-answer", onAnswer);
+    socket.on("webrtc-ice", onIce);
+    socket.on("listener-left", onListenerLeft);
+
+    return () => {
+      socket.off("listener-joined", onListenerJoined);
+      socket.off("webrtc-answer", onAnswer);
+      socket.off("webrtc-ice", onIce);
+      socket.off("listener-left", onListenerLeft);
+    };
+  }, [createPeerForListener]);
+
+  // ── Go Live ──
+  const goLive = async () => {
+    if (!isDJ) {
+      setStatus("Only DJs and admins can broadcast.");
       return;
     }
 
-    setStatus("Connecting to LiveKit...");
+    setStatus("Starting broadcast...");
 
     try {
       await resumeAudio();
-      const { Room, RoomEvent } = await import("livekit-client");
 
-      const room = new Room();
-      roomRef.current = room;
+      const dest = getStreamDestination();
+      const stream = dest.stream;
 
-      room.on(RoomEvent.Connected, () => {
-        setStatus("Connected to LiveKit room!");
-        setConnected(true);
-      });
-
-      room.on(RoomEvent.Disconnected, () => {
-        setStatus("Disconnected from LiveKit");
-        setConnected(false);
-      });
-
-      room.on(RoomEvent.ParticipantConnected, (p) => {
-        setListeners(prev => prev + 1);
-        setStatus(`Listener joined: ${p.identity}`);
-      });
-
-      room.on(RoomEvent.ParticipantDisconnected, () => {
-        setListeners(prev => Math.max(0, prev - 1));
-      });
-
-      await room.connect(tokenInfo.url, tokenInfo.token);
-
-      // Publish the master audio stream from audioEngine
-      if (isDJ) {
-        const dest = getStreamDestination();
-        const stream = dest.stream;
-        const audioTrack = stream.getAudioTracks()[0];
-
-        if (audioTrack) {
-          await room.localParticipant.publishTrack(audioTrack, {
-            name: "dj-master-audio",
-            source: "microphone",
-          });
-          setStatus("Broadcasting master audio to LiveKit!");
-        } else {
-          setStatus("No audio track — play some decks in the Mixer first!");
-        }
+      if (!stream || stream.getAudioTracks().length === 0) {
+        setStatus("No audio — open the Mixer and play a deck first!");
+        return;
       }
+
+      streamRef.current = stream;
+      liveRef.current = true;
+      setIsLive(true);
+
+      const socket = getSocket();
+      socket.emit("dj-go-live", { roomId });
+
+      setStatus("🔴 You are LIVE! Listeners can now connect and hear your mix.");
     } catch (e) {
-      if (e.message?.includes("Failed to fetch") || e.message?.includes("WebSocket") || e.message?.includes("connect")) {
-        setStatus("LiveKit server unreachable — starting demo broadcast mode");
-        startDemoBroadcast();
-      } else {
-        setStatus("LiveKit error: " + e.message);
-        console.error(e);
-      }
+      setStatus("Failed to start broadcast: " + e.message);
+      console.error(e);
     }
   };
 
-  // Demo broadcast mode — works without a LiveKit server
-  const startDemoBroadcast = () => {
-    setDemoMode(true);
-    setConnected(true);
-    setStatus("🎧 Demo broadcast active — audio plays locally, Socket.IO syncs energy to listeners");
-    // Simulate listeners joining
-    const interval = setInterval(() => {
-      if (!roomRef.current?._demo) { clearInterval(interval); return; }
-      setListeners(prev => Math.min(prev + Math.floor(Math.random() * 2), 12));
-    }, 5000);
-    roomRef.current = { _demo: true, _interval: interval };
-  };
+  // ── Stop broadcast ──
+  const stopLive = () => {
+    liveRef.current = false;
+    setIsLive(false);
 
-  const disconnectLiveKit = () => {
-    if (roomRef.current) {
-      if (roomRef.current._demo) {
-        clearInterval(roomRef.current._interval);
-      } else {
-        roomRef.current.disconnect();
-      }
-      roomRef.current = null;
-    }
-    setConnected(false);
-    setDemoMode(false);
+    peersRef.current.forEach((pc) => pc.close());
+    peersRef.current.clear();
+    setListenerList([]);
     setListeners(0);
-    setStatus("Disconnected");
+
+    streamRef.current = null;
+
+    const socket = getSocket();
+    socket.emit("dj-stop-live", { roomId });
+
+    setStatus("Broadcast stopped.");
   };
 
   return (
@@ -191,7 +244,7 @@ export default function Broadcast() {
       <h1 className="page-title">📡 Live Broadcast</h1>
 
       <div className="broadcast-grid">
-        {/* Audio Monitor Panel */}
+        {/* Audio Monitor */}
         <div className="broadcast-panel">
           <h3>🎧 Master Audio Bus</h3>
           <canvas ref={canvasRef} width="400" height="100" className="broadcast-canvas" />
@@ -202,13 +255,13 @@ export default function Broadcast() {
           </div>
 
           <p style={{ color: "#888", fontSize: 12, marginTop: 8 }}>
-            Audio is sourced from the Mixer's master bus. Play decks in the Mixer to see activity here.
+            Audio from the Mixer's master bus. Play decks in the Mixer to see activity.
           </p>
         </div>
 
-        {/* LiveKit Connection Panel */}
+        {/* Broadcast Controls */}
         <div className="broadcast-panel">
-          <h3>📡 LiveKit Streaming</h3>
+          <h3>📡 WebRTC Broadcast</h3>
 
           <div className="broadcast-info">
             <div className="info-row">
@@ -216,75 +269,63 @@ export default function Broadcast() {
               <span className={`role-badge role-${user?.role}`}>{user?.role}</span>
             </div>
             <div className="info-row">
-              <span className="info-label">Can Publish:</span>
-              <span style={{ color: isDJ ? "#39ff14" : "#f85149" }}>{isDJ ? "Yes" : "No (subscribe only)"}</span>
+              <span className="info-label">Can Broadcast:</span>
+              <span style={{ color: isDJ ? "#39ff14" : "#f85149" }}>{isDJ ? "Yes" : "No"}</span>
             </div>
             <div className="info-row">
               <span className="info-label">Status:</span>
-              <span className={`connection-status ${connected ? "online" : ""}`}>
-                {connected ? (demoMode ? "DEMO LIVE" : "LIVE") : "Offline"}
+              <span className={`connection-status ${isLive ? "online" : ""}`}>
+                {isLive ? "🔴 LIVE" : "Offline"}
               </span>
             </div>
-            {connected && (
+            {isLive && (
               <div className="info-row">
                 <span className="info-label">Listeners:</span>
-                <span style={{ color: "#00f0ff" }}>{listeners}</span>
+                <span style={{ color: "#00f0ff", fontWeight: "bold" }}>{listeners}</span>
               </div>
             )}
           </div>
 
           <div className="broadcast-actions">
-            <button className="deck-btn" onClick={requestToken}>
-              🔑 Get Token
-            </button>
-            {!connected ? (
-              <button
-                className="deck-btn"
-                onClick={connectLiveKit}
-                disabled={!tokenInfo}
-              >
+            {!isLive ? (
+              <button className="deck-btn go-live-btn" onClick={goLive} disabled={!isDJ}>
                 📡 Go Live
               </button>
             ) : (
-              <button className="deck-btn active" onClick={disconnectLiveKit}>
+              <button className="deck-btn active stop-btn" onClick={stopLive}>
                 🔴 Stop Broadcast
               </button>
             )}
           </div>
 
-          {tokenInfo && (
-            <div className="token-info">
-              <div className="info-row">
-                <span className="info-label">Room:</span>
-                <span>{tokenInfo.room}</span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">Server:</span>
-                <span>{tokenInfo.url}</span>
-              </div>
-              {tokenInfo.mock && (
-                <div className="broadcast-warning">
-                  ⚠️ No LiveKit server — Go Live will use demo mode.<br />
-                  For real streaming: <code>docker run --rm -p 7880:7880 -p 7881:7881 -e LIVEKIT_KEYS="devkey:secret" livekit/livekit-server</code>
-                </div>
-              )}
-            </div>
-          )}
-
           {status && <div className="broadcast-status">{status}</div>}
         </div>
       </div>
 
+      {/* Connected Listeners */}
+      {isLive && listenerList.length > 0 && (
+        <div className="broadcast-panel" style={{ marginTop: 16 }}>
+          <h3>👥 Connected Listeners ({listenerList.length})</h3>
+          <div className="listener-grid">
+            {listenerList.map((l) => (
+              <div key={l.id} className="listener-chip">
+                <span style={{ fontSize: 8 }}>🟢</span> {l.identity || "Anonymous"}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Instructions */}
       <div className="broadcast-panel" style={{ marginTop: 16 }}>
-        <h3>📘 How to Use LiveKit Streaming</h3>
+        <h3>📘 How It Works</h3>
         <ol className="broadcast-instructions">
-          <li>Open the <strong>Mixer</strong> and play some decks to generate audio</li>
-          <li>Come back here — the master bus energy monitor shows live audio</li>
-          <li>Start a LiveKit server locally with Docker (or use a cloud instance)</li>
-          <li>Click <strong>Get Token</strong> to request an authentication token</li>
-          <li>Click <strong>Go Live</strong> to broadcast the mixer's audio to all listeners</li>
-          <li>Pub owners open the <strong>Listener</strong> page to receive the stream</li>
+          <li>Open the <strong>Mixer</strong> and load/play tracks on the decks</li>
+          <li>Come back here — the master bus monitor shows your live audio</li>
+          <li>Click <strong>Go Live</strong> to start broadcasting via WebRTC</li>
+          <li>Pub owners open the <strong>Listener</strong> page and enter their activation code</li>
+          <li>Your mix streams directly to them — peer-to-peer, real audio!</li>
+          <li>Listeners see synchronized 3D visuals driven by your audio energy</li>
         </ol>
       </div>
     </div>

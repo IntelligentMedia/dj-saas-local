@@ -13,14 +13,14 @@ import { joinRoom, emitReaction, emitSongRequest, getSocket } from "../utils/soc
 import LiveChat from "../components/LiveChat";
 
 /**
- * PubListener — Audience / Pub-owner listen-only page
+ * PubListener — Audience / Pub-owner listen page (WebRTC)
  *
  * Flow:
- *   1. Enter activation code
- *   2. Backend validates → returns LiveKit token + room name
- *   3. Connect to LiveKit room as subscriber (listen-only)
- *   4. Pipe remote DJ audio into web audio analyser
- *   5. Drive the same 3D engine visuals (crowd, pyro, lights)
+ *   1. Enter activation code → validated by API
+ *   2. Join Socket.IO room as "listener"
+ *   3. Emit "listener-request" → server tells DJ to create a peer connection
+ *   4. DJ sends WebRTC offer → listener answers → ICE → real audio streams P2P
+ *   5. Pipe received audio into Web Audio analyser → drive 3D visuals
  */
 export default function PubListener() {
   const mountRef = useRef(null);
@@ -31,8 +31,9 @@ export default function PubListener() {
   const [djName, setDjName] = useState("");
   const [mode, setMode] = useState("stage");
   const [listeners, setListeners] = useState(0);
+  const [audioActive, setAudioActive] = useState(false);
 
-  const roomRef = useRef(null);
+  const pcRef = useRef(null);         // RTCPeerConnection
   const analyserRef = useRef(null);
   const audioCtxRef = useRef(null);
   const animFrameRef = useRef(null);
@@ -47,13 +48,15 @@ export default function PubListener() {
   const [ratingHover, setRatingHover] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
-  const [djRatingAvg, setDjRatingAvg] = useState(null);
 
   // ── Song Request ──
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [requestTitle, setRequestTitle] = useState("");
   const [requestArtist, setRequestArtist] = useState("");
   const [requestSent, setRequestSent] = useState(false);
+
+  const roomId = "dj-room";
+  const djIdRef = useRef(null); // for rating
 
   const sendSongRequest = () => {
     if (!requestTitle.trim()) return;
@@ -70,7 +73,7 @@ export default function PubListener() {
       await apiFetch("/profile/ratings", {
         method: "POST",
         body: JSON.stringify({
-          dj_id: roomRef.current?.djId || null,
+          dj_id: djIdRef.current || null,
           rating: myRating,
           comment: ratingComment.trim() || null,
         }),
@@ -92,8 +95,8 @@ export default function PubListener() {
 
     const handleReaction = ({ emoji, from }) => {
       const id = Date.now() + Math.random();
-      setReactions(prev => [...prev.slice(-20), { id, emoji, from }]);
-      setTimeout(() => setReactions(prev => prev.filter(r => r.id !== id)), 3000);
+      setReactions((prev) => [...prev.slice(-20), { id, emoji, from }]);
+      setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 3000);
     };
 
     const handleParticipants = ({ count, dj }) => {
@@ -101,13 +104,14 @@ export default function PubListener() {
       if (dj) setDjName(dj);
     };
 
-    // Fetch DJ id from live rooms to associate ratings
-    apiFetch("/rooms/live").then(rooms => {
-      if (rooms?.length > 0 && rooms[0].dj_id) {
-        if (!roomRef.current) roomRef.current = {};
-        roomRef.current.djId = rooms[0].dj_id;
-      }
-    }).catch(() => {});
+    // Fetch DJ id from live rooms for ratings
+    apiFetch("/rooms/live")
+      .then((rooms) => {
+        if (rooms?.length > 0 && rooms[0].dj_id) {
+          djIdRef.current = rooms[0].dj_id;
+        }
+      })
+      .catch(() => {});
 
     socket.on("energy", handleEnergy);
     socket.on("reaction", handleReaction);
@@ -120,7 +124,120 @@ export default function PubListener() {
     };
   }, []);
 
-  // ── Step 1: Validate activation code → get LiveKit token ──
+  // ── WebRTC signaling handlers ──
+  useEffect(() => {
+    const socket = getSocket();
+
+    // DJ sends us an offer
+    const onOffer = async ({ djId, offer }) => {
+      console.log("[Listener] Received WebRTC offer from DJ");
+      setStatus("Connecting to DJ's audio stream...");
+
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ],
+      });
+      pcRef.current = pc;
+
+      // When we receive the DJ's audio track
+      pc.ontrack = (e) => {
+        console.log("[Listener] Received audio track from DJ!");
+        const stream = e.streams[0] || new MediaStream([e.track]);
+
+        // Play the audio through speakers
+        const audioEl = document.createElement("audio");
+        audioEl.srcObject = stream;
+        audioEl.autoplay = true;
+        audioEl.style.display = "none";
+        document.body.appendChild(audioEl);
+        audioEl.play().catch(() => {});
+
+        // Create Web Audio analyser for 3D visuals
+        const AC = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AC();
+        audioCtxRef.current = ctx;
+        if (ctx.state === "suspended") ctx.resume();
+
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        // Don't connect analyser to destination — audioEl already plays the sound
+        analyserRef.current = analyser;
+        setAudioActive(true);
+        setStatus("Receiving DJ's live audio!");
+      };
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          socket.emit("webrtc-ice", { targetId: djId, candidate: e.candidate });
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        if (state === "connected") {
+          setStatus("Connected — listening to DJ's live mix!");
+        }
+        if (state === "disconnected" || state === "failed") {
+          setStatus("Connection lost — DJ may have stopped broadcasting.");
+          setAudioActive(false);
+        }
+      };
+
+      // Set remote offer, create answer, send back
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("webrtc-answer", { djId, answer: pc.localDescription });
+    };
+
+    const onIce = ({ fromId, candidate }) => {
+      if (pcRef.current) {
+        pcRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      }
+    };
+
+    const onDjOffline = () => {
+      setStatus("DJ has gone offline.");
+      setAudioActive(false);
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+    };
+
+    const onNoDj = ({ message }) => {
+      setStatus(message || "No DJ is currently live. Wait for a DJ to start broadcasting.");
+    };
+
+    socket.on("webrtc-offer", onOffer);
+    socket.on("webrtc-ice", onIce);
+    socket.on("dj-offline", onDjOffline);
+    socket.on("no-dj", onNoDj);
+
+    // If DJ goes live while we're already connected
+    socket.on("dj-live", ({ dj }) => {
+      setDjName(dj);
+      setStatus(`DJ ${dj} is live! Requesting stream...`);
+      // Auto-request connection
+      if (connected) {
+        socket.emit("listener-request", { roomId });
+      }
+    });
+
+    return () => {
+      socket.off("webrtc-offer", onOffer);
+      socket.off("webrtc-ice", onIce);
+      socket.off("dj-offline", onDjOffline);
+      socket.off("no-dj", onNoDj);
+      socket.off("dj-live");
+    };
+  }, [connected]);
+
+  // ── Connect: validate activation code then request stream ──
   const handleConnect = async () => {
     if (!activationCode.trim()) {
       setStatus("Enter your activation code");
@@ -129,7 +246,6 @@ export default function PubListener() {
     setStatus("Validating code...");
 
     try {
-      // Validate the activation code
       const valRes = await apiFetch("/activation/validate", {
         method: "POST",
         body: JSON.stringify({ code: activationCode.trim() }),
@@ -140,149 +256,48 @@ export default function PubListener() {
         return;
       }
 
-      setStatus("Code valid! Requesting LiveKit token...");
+      setStatus("Code valid! Joining room...");
 
-      // Get LiveKit token for the room as a listener
-      const tokenRes = await api(`/livekit/token?room=dj-room&identity=listener-${Date.now()}`);
-      if (!tokenRes.ok) {
-        setStatus("Failed to get broadcast token");
-        return;
-      }
-      const tokenData = await tokenRes.json();
+      // Join Socket.IO room as listener
+      const identity = "listener-" + Date.now();
+      joinRoom(roomId, identity, "listener");
 
-      setStatus("Connecting to DJ stream...");
+      setConnected(true);
+      setStatus("Connected to room — requesting DJ's audio stream...");
 
-      // ── Step 2: Connect to LiveKit room ──
-      try {
-        const { Room, RoomEvent, Track } = await import("livekit-client");
-
-        const room = new Room();
-        roomRef.current = room;
-
-        room.on(RoomEvent.Connected, () => {
-          setConnected(true);
-          setStatus("Connected — listening to DJ!");
-          setListeners(room.participants.size);
-        });
-
-        room.on(RoomEvent.Disconnected, () => {
-          setConnected(false);
-          setStatus("Disconnected");
-        });
-
-        room.on(RoomEvent.ParticipantConnected, () => {
-          setListeners(room.participants.size);
-        });
-
-        room.on(RoomEvent.ParticipantDisconnected, () => {
-          setListeners(room.participants.size);
-        });
-
-        // ── Step 3: When DJ's audio track arrives, pipe into analyser ──
-        room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-          if (track.kind === Track.Kind.Audio) {
-            setDjName(participant.identity || "DJ");
-
-            // Attach audio to DOM
-            const audioEl = track.attach();
-            document.body.appendChild(audioEl);
-            audioEl.style.display = "none";
-
-            // Create web audio analyser
-            const AC = window.AudioContext || window.webkitAudioContext;
-            const ctx = new AC();
-            audioCtxRef.current = ctx;
-            const source = ctx.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
-            const analyser = ctx.createAnalyser();
-            analyser.fftSize = 256;
-            source.connect(analyser);
-            analyserRef.current = analyser;
-          }
-        });
-
-        await room.connect(tokenData.url, tokenData.token);
-      } catch (e) {
-        if (e.message?.includes("livekit-client")) {
-          setStatus("livekit-client not installed — using demo mode");
-          startDemoMode();
-        } else {
-          setStatus("LiveKit error: " + e.message);
-        }
-      }
+      // Request WebRTC stream from DJ
+      const socket = getSocket();
+      socket.emit("listener-request", { roomId });
     } catch (e) {
       setStatus("Connection error: " + e.message);
-      // Fallback: start demo mode so the page is usable without LiveKit
-      startDemoMode();
     }
   };
 
-  // ── Demo mode: rich synthetic audio for testing without LiveKit ──
-  const startDemoMode = () => {
+  // ── Quick-connect without activation code (for testing) ──
+  const handleQuickConnect = () => {
+    const identity = "listener-" + Date.now();
+    joinRoom(roomId, identity, "listener");
     setConnected(true);
-    setDjName("Demo DJ");
-    setStatus("Demo mode — synthetic audio drives visuals");
+    setStatus("Connected to room — requesting DJ's audio stream...");
 
-    // Join Socket.IO room as listener
-    joinRoom("dj-room", "listener-" + Date.now(), "listener");
-
-    // Create rich oscillator bank for a visible spectrum
-    const AC = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AC();
-    audioCtxRef.current = ctx;
-    if (ctx.state === "suspended") ctx.resume();
-
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    const mixGain = ctx.createGain();
-    mixGain.gain.value = 1.0;
-    mixGain.connect(analyser);
-    // Don't connect to destination (silent)
-
-    const oscNodes = [];
-    // Bass
-    [40, 80, 120].forEach(f => {
-      const osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = f;
-      const g = ctx.createGain(); g.gain.value = 0.3;
-      osc.connect(g).connect(mixGain); osc.start(); oscNodes.push(osc);
-    });
-    // Mids
-    [300, 600, 1000, 1500].forEach(f => {
-      const osc = ctx.createOscillator(); osc.type = "sawtooth"; osc.frequency.value = f;
-      const g = ctx.createGain(); g.gain.value = 0.12;
-      osc.connect(g).connect(mixGain); osc.start(); oscNodes.push(osc);
-    });
-    // Highs
-    [3000, 5000].forEach(f => {
-      const osc = ctx.createOscillator(); osc.type = "triangle"; osc.frequency.value = f;
-      const g = ctx.createGain(); g.gain.value = 0.06;
-      osc.connect(g).connect(mixGain); osc.start(); oscNodes.push(osc);
-    });
-    // LFO for rhythmic pulsing
-    const lfo = ctx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = 2.2;
-    const lfoG = ctx.createGain(); lfoG.gain.value = 0.4;
-    lfo.connect(lfoG).connect(mixGain.gain); lfo.start(); oscNodes.push(lfo);
-
-    analyserRef.current = analyser;
-    // Store for cleanup
-    roomRef.current = { _demo: true, _oscNodes: oscNodes };
+    const socket = getSocket();
+    socket.emit("listener-request", { roomId });
   };
 
   const handleDisconnect = () => {
-    if (roomRef.current) {
-      // Cleanup demo oscillators if in demo mode
-      if (roomRef.current._demo && roomRef.current._oscNodes) {
-        roomRef.current._oscNodes.forEach(n => { try { n.stop(); } catch {} });
-      } else if (roomRef.current.disconnect) {
-        roomRef.current.disconnect();
-      }
-      roomRef.current = null;
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
     }
     if (audioCtxRef.current) {
       audioCtxRef.current.close().catch(() => {});
       audioCtxRef.current = null;
     }
     analyserRef.current = null;
+    // Remove any audio elements we appended
+    document.querySelectorAll("audio[autoplay]").forEach((el) => el.remove());
     setConnected(false);
+    setAudioActive(false);
     setDjName("");
     setStatus("Disconnected");
   };
@@ -303,24 +318,33 @@ export default function PubListener() {
     const stage = createStage(scene);
     const clubLights = createClubLights(scene);
     const lasers = createLasers(scene);
-    const crowdAvatars = createCrowd(scene, 30); // more crowd for pub feel
+    const crowdAvatars = createCrowd(scene, 30);
     const metaAvatars = createMetaAvatars(scene);
     const pyroState = createPyro(scene);
 
     camera.position.set(0, 3, 10);
     camera.lookAt(0, 1, 0);
 
-    let lastEnergy = 0, mouseX = 0;
+    let lastEnergy = 0,
+      mouseX = 0;
     let currentMode = "stage";
 
-    const handleMouse = (e) => { mouseX = (e.clientX / window.innerWidth - 0.5) * 2; };
+    const handleMouse = (e) => {
+      mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
+    };
     window.addEventListener("mousemove", handleMouse);
 
-    // Initial mode setup
     switchSceneMode(currentMode, {
-      avatar: avatarParts.avatar, deckA: stage.deckA, deckB: stage.deckB,
-      gridHelper: stage.gridHelper, clubLights, lasers, crowdAvatars,
-      metaAvatars, globe: stage.globe, djNode: stage.djNode,
+      avatar: avatarParts.avatar,
+      deckA: stage.deckA,
+      deckB: stage.deckB,
+      gridHelper: stage.gridHelper,
+      clubLights,
+      lasers,
+      crowdAvatars,
+      metaAvatars,
+      globe: stage.globe,
+      djNode: stage.djNode,
     });
 
     const dataArray = analyserRef.current
@@ -341,7 +365,6 @@ export default function PubListener() {
       const energyVal = avg / 255;
       const combinedEnergy = Math.min(1, energyVal + 0.05);
 
-      // Update React state periodically (not every frame)
       if (Math.abs(energyVal - lastEnergy) > 0.02) {
         setEnergy(energyVal);
         setAudioEnergy(energyVal);
@@ -357,19 +380,30 @@ export default function PubListener() {
       animateLasers(lasers, energyVal);
       animateCrowd(crowdAvatars, combinedEnergy);
       animateMetaAvatars(metaAvatars);
-      animateCamera(camera, { energy: energyVal, pyroActive: pyroState.active, mouseX, currentMode });
+      animateCamera(camera, {
+        energy: energyVal,
+        pyroActive: pyroState.active,
+        mouseX,
+        currentMode,
+      });
 
       renderer.render(scene, camera);
     }
     animate();
 
-    // Expose mode switcher
     container._switchMode = (m) => {
       currentMode = m;
       switchSceneMode(m, {
-        avatar: avatarParts.avatar, deckA: stage.deckA, deckB: stage.deckB,
-        gridHelper: stage.gridHelper, clubLights, lasers, crowdAvatars,
-        metaAvatars, globe: stage.globe, djNode: stage.djNode,
+        avatar: avatarParts.avatar,
+        deckA: stage.deckA,
+        deckB: stage.deckB,
+        gridHelper: stage.gridHelper,
+        clubLights,
+        lasers,
+        crowdAvatars,
+        metaAvatars,
+        globe: stage.globe,
+        djNode: stage.djNode,
       });
     };
 
@@ -418,8 +452,8 @@ export default function PubListener() {
               🔌 Connect
             </button>
           </div>
-          <button className="deck-btn demo-btn" onClick={startDemoMode} style={{ marginTop: 12 }}>
-            🎬 Demo Mode (no code needed)
+          <button className="deck-btn" onClick={handleQuickConnect} style={{ marginTop: 12, opacity: 0.7 }}>
+            ⚡ Quick Connect (no code)
           </button>
           {status && <p className="listener-status">{status}</p>}
         </div>
@@ -429,13 +463,17 @@ export default function PubListener() {
           <div className="listener-live-bar">
             <span className="live-dot">🔴</span>
             <span className="live-label">LISTENING</span>
-            <span className="listener-dj">DJ: {djName}</span>
+            {djName && <span className="listener-dj">DJ: {djName}</span>}
             <span className="listener-count">👥 {listeners} connected</span>
-            <span className="listener-energy-badge" style={{
-              background: energy > 0.6 ? "#ff3300" : energy > 0.3 ? "#ff9800" : "#00f0ff"
-            }}>
+            <span
+              className="listener-energy-badge"
+              style={{
+                background: energy > 0.6 ? "#ff3300" : energy > 0.3 ? "#ff9800" : "#00f0ff",
+              }}
+            >
               Energy: {Math.round(energy * 100)}%
             </span>
+            {audioActive && <span className="audio-badge">🔊 Live Audio</span>}
             <button className="deck-btn disconnect-btn" onClick={handleDisconnect}>
               ⏹ Disconnect
             </button>
@@ -457,7 +495,7 @@ export default function PubListener() {
 
           {/* Emoji Reactions */}
           <div className="listener-reactions-bar">
-            {["🔥", "❤️", "🎵", "🙌", "💃", "🎉"].map(emoji => (
+            {["🔥", "❤️", "🎵", "🙌", "💃", "🎉"].map((emoji) => (
               <button key={emoji} className="reaction-btn" onClick={() => emitReaction(emoji)}>
                 {emoji}
               </button>
@@ -465,13 +503,15 @@ export default function PubListener() {
           </div>
           {reactions.length > 0 && (
             <div className="reactions-float">
-              {reactions.map(r => (
-                <span key={r.id} className="floating-reaction">{r.emoji}</span>
+              {reactions.map((r) => (
+                <span key={r.id} className="floating-reaction">
+                  {r.emoji}
+                </span>
               ))}
             </div>
           )}
 
-          {/* ═══ Rate This Session ═══ */}
+          {/* Rate This Session */}
           <div className="listener-rating-section">
             {!showRating ? (
               <button className="deck-btn rate-session-btn" onClick={() => setShowRating(true)}>
@@ -483,7 +523,7 @@ export default function PubListener() {
                 {!ratingSubmitted ? (
                   <>
                     <div className="star-row">
-                      {[1, 2, 3, 4, 5].map(star => (
+                      {[1, 2, 3, 4, 5].map((star) => (
                         <span
                           key={star}
                           className={`star ${star <= (ratingHover || myRating) ? "filled" : ""}`}
@@ -503,19 +543,24 @@ export default function PubListener() {
                       className="rating-comment-input"
                       placeholder="Optional comment..."
                       value={ratingComment}
-                      onChange={e => setRatingComment(e.target.value)}
+                      onChange={(e) => setRatingComment(e.target.value)}
                       maxLength={200}
                     />
                     <div className="rating-actions">
                       <button className="deck-btn" onClick={submitRating} disabled={!myRating}>
                         Submit Rating
                       </button>
-                      <button className="deck-btn" onClick={() => setShowRating(false)}>Cancel</button>
+                      <button className="deck-btn" onClick={() => setShowRating(false)}>
+                        Cancel
+                      </button>
                     </div>
                   </>
                 ) : (
                   <div className="rating-thanks">
-                    <span className="rating-thanks-stars">{"★".repeat(myRating)}{"☆".repeat(5 - myRating)}</span>
+                    <span className="rating-thanks-stars">
+                      {"★".repeat(myRating)}
+                      {"☆".repeat(5 - myRating)}
+                    </span>
                     <p>Thanks for your rating!</p>
                   </div>
                 )}
@@ -523,7 +568,7 @@ export default function PubListener() {
             )}
           </div>
 
-          {/* ═══ Song Request ═══ */}
+          {/* Song Request */}
           <div className="listener-request-section">
             {!showRequestForm ? (
               <button className="deck-btn request-song-btn" onClick={() => setShowRequestForm(true)}>
@@ -541,7 +586,7 @@ export default function PubListener() {
                       className="request-input"
                       placeholder="Song title..."
                       value={requestTitle}
-                      onChange={e => setRequestTitle(e.target.value)}
+                      onChange={(e) => setRequestTitle(e.target.value)}
                       maxLength={100}
                     />
                     <input
@@ -549,14 +594,16 @@ export default function PubListener() {
                       className="request-input"
                       placeholder="Artist (optional)..."
                       value={requestArtist}
-                      onChange={e => setRequestArtist(e.target.value)}
+                      onChange={(e) => setRequestArtist(e.target.value)}
                       maxLength={100}
                     />
                     <div className="request-actions">
                       <button className="deck-btn" onClick={sendSongRequest} disabled={!requestTitle.trim()}>
                         Send Request
                       </button>
-                      <button className="deck-btn" onClick={() => setShowRequestForm(false)}>Cancel</button>
+                      <button className="deck-btn" onClick={() => setShowRequestForm(false)}>
+                        Cancel
+                      </button>
                     </div>
                   </>
                 )}
@@ -566,12 +613,22 @@ export default function PubListener() {
 
           {/* Mode buttons */}
           <div className="viz-mode-buttons" style={{ padding: "8px 20px" }}>
-            <button className={`deck-btn ${mode === "stage" ? "active" : ""}`} onClick={() => switchModeBtn("stage")}>🎤 Stage</button>
-            <button className={`deck-btn ${mode === "metaverse" ? "active" : ""}`} onClick={() => switchModeBtn("metaverse")}>🌐 Metaverse</button>
-            <button className={`deck-btn ${mode === "globe" ? "active" : ""}`} onClick={() => switchModeBtn("globe")}>🌍 Pulse Globe</button>
+            <button className={`deck-btn ${mode === "stage" ? "active" : ""}`} onClick={() => switchModeBtn("stage")}>
+              🎤 Stage
+            </button>
+            <button className={`deck-btn ${mode === "metaverse" ? "active" : ""}`} onClick={() => switchModeBtn("metaverse")}>
+              🌐 Metaverse
+            </button>
+            <button className={`deck-btn ${mode === "globe" ? "active" : ""}`} onClick={() => switchModeBtn("globe")}>
+              🌍 Pulse Globe
+            </button>
           </div>
 
-          {status && <p className="listener-status" style={{ padding: "0 20px" }}>{status}</p>}
+          {status && (
+            <p className="listener-status" style={{ padding: "0 20px" }}>
+              {status}
+            </p>
+          )}
 
           {/* 3D Canvas */}
           <div ref={mountRef} className="viz-canvas listener-canvas" />

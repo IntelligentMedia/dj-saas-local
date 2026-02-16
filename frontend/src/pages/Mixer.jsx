@@ -228,6 +228,41 @@ export default function Mixer({ mode = "classic", onBack }) {
     }
   };
 
+  // Load entire playlist: first track → deck, rest → queue
+  const handleLoadPlaylist = async (tracks) => {
+    if (!tracks || tracks.length === 0) return;
+    clearQueue();
+
+    // Fetch stream URLs for all tracks in parallel
+    const enriched = await Promise.all(
+      tracks.map(async (t) => {
+        try {
+          const data = await apiFetch(`/music/tracks/${t.id}/stream`);
+          return { ...t, stream_url: data.stream_url };
+        } catch { return null; }
+      })
+    );
+    const valid = enriched.filter(Boolean);
+    if (valid.length === 0) { toast.error("Could not load any tracks"); return; }
+
+    // Load first track to current deck
+    handleLoadTrack(valid[0]);
+
+    // Add remaining tracks to queue
+    if (valid.length > 1) {
+      const queueItems = valid.slice(1).map(t => ({
+        url: t.stream_url,
+        title: t.title,
+        artist: t.artist,
+        genre: t.genre,
+        bpm: t.bpm,
+      }));
+      setQueue(queueItems);
+      setShowQueue(true);
+      toast.info(`Playlist loaded: 1 track on Deck ${loadTarget}, ${queueItems.length} queued`);
+    }
+  };
+
   // Add-to-playlist flow
   const handleAddToPlaylist = async (track) => {
     setAddToPlaylistTrack(track);
@@ -773,6 +808,7 @@ export default function Mixer({ mode = "classic", onBack }) {
           {libraryTab === "playlists" && (
             <PlaylistBuilder
               onLoadTrack={handleLoadTrack}
+              onLoadPlaylist={handleLoadPlaylist}
             />
           )}
         </div>
