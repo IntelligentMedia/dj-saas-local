@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { apiFetch } from "../utils/api";
+import { apiFetch, getToken } from "../utils/api";
 
 export default function PlaylistBuilder({ onLoadPlaylist, onLoadTrack }) {
   const [playlists, setPlaylists] = useState([]);
@@ -75,7 +75,9 @@ export default function PlaylistBuilder({ onLoadPlaylist, onLoadTrack }) {
     try {
       const data = await apiFetch(`/music/tracks/${track.id}/stream`);
       if (data.stream_url && onLoadTrack) {
-        onLoadTrack({ ...track, stream_url: data.stream_url });
+        const sep = data.stream_url.includes("?") ? "&" : "?";
+        const authedUrl = `${data.stream_url}${sep}token=${getToken()}`;
+        onLoadTrack({ ...track, stream_url: authedUrl });
       }
     } catch (e) { console.error(e); }
   };

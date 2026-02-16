@@ -54,9 +54,9 @@ export default function DJSettings() {
   const loadSettings = async () => {
     try {
       const d = await apiFetch("/profile/dj-settings");
-      setProfile(d.profile);
-      setAudio(d.audio);
-      setNotif(d.notifications);
+      if (d.profile) setProfile(d.profile);
+      if (d.audio) setAudio(d.audio);
+      if (d.notifications) setNotif(d.notifications);
       setAvail({
         days: d.availability.days,
         start: (d.availability.start || "18:00").slice(0, 5),

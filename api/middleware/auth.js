@@ -20,13 +20,13 @@ const PERMISSIONS = {
   dj_features:     ["dj", "admin", "sysadmin"],
 };
 
-// ── Core auth — verifies JWT ──
+// ── Core auth — verifies JWT (header or ?token= query param for media) ──
 function auth(req, res, next) {
   const header = req.headers.authorization;
-  if (!header) return res.sendStatus(401);
-  const token = header.split(" ")[1];
+  const raw = header ? header.split(" ")[1] : req.query.token;
+  if (!raw) return res.sendStatus(401);
   try {
-    req.user = jwt.verify(token, SECRET);
+    req.user = jwt.verify(raw, SECRET);
     next();
   } catch {
     res.sendStatus(403);

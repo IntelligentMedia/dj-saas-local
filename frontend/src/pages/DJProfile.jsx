@@ -156,11 +156,11 @@ export default function DJProfile() {
     );
   }
 
-  if (!profile) {
+  if (!profile || !profile.user) {
     return <div className="profile-page"><p className="listener-status">Failed to load profile</p></div>;
   }
 
-  const { user, stats, top_genres, recent_sessions } = profile;
+  const { user, stats = {}, top_genres = [], recent_sessions = [] } = profile;
 
   return (
     <div className="profile-page">

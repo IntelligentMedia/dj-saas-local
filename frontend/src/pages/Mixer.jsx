@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { Hands } from "@mediapipe/hands";
 import { Camera } from "@mediapipe/camera_utils";
-import { apiFetch } from "../utils/api";
+import { apiFetch, getToken } from "../utils/api";
 import useDJStore from "../store/djStore";
 import { toast } from "../store/toastStore";
 import { setCrossfader as setAudioCrossfader, getMasterGain, setCrossfaderCurve, getCrossfaderCurve } from "../engine";
@@ -238,7 +238,10 @@ export default function Mixer({ mode = "classic", onBack }) {
       tracks.map(async (t) => {
         try {
           const data = await apiFetch(`/music/tracks/${t.id}/stream`);
-          return { ...t, stream_url: data.stream_url };
+          // Append JWT token so <audio> element can authenticate to the proxy
+          const sep = data.stream_url.includes("?") ? "&" : "?";
+          const authedUrl = `${data.stream_url}${sep}token=${getToken()}`;
+          return { ...t, stream_url: authedUrl };
         } catch { return null; }
       })
     );

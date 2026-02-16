@@ -126,12 +126,58 @@ router.get("/tracks/:id/stream", auth, streamLimiter, (req, res) => {
     // Increment play count
     db.query("UPDATE cloud_tracks SET plays = plays + 1 WHERE id=?", [req.params.id]);
 
-    // Return stream URL with security headers (no download)
+    // Return PROXY URL so the browser can use crossOrigin="anonymous"
+    // (External URLs like soundhelix.com don't send CORS headers)
+    const API_BASE = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
     res.json({
-      stream_url: rows[0].stream_url,
-      expires_in: 3600, // 1 hour token validity
+      stream_url: `${API_BASE}/music/tracks/${req.params.id}/proxy`,
+      expires_in: 3600,
       policy: "stream-only",
       download: false,
+    });
+  });
+});
+
+// ─── Audio Proxy — streams remote audio with proper CORS headers ───
+// GET /music/tracks/:id/proxy
+router.get("/tracks/:id/proxy", auth, streamLimiter, (req, res) => {
+  db.query("SELECT stream_url FROM cloud_tracks WHERE id=? AND is_active=1", [req.params.id], (err, rows) => {
+    if (err || !rows || rows.length === 0) {
+      return res.status(404).json({ error: "Track not found" });
+    }
+
+    const remoteUrl = rows[0].stream_url;
+
+    // Use global fetch (Node 18+) to stream the audio through our server
+    const controller = new AbortController();
+    // If client disconnects, abort the upstream fetch to avoid dangling streams
+    req.on("close", () => controller.abort());
+
+    fetch(remoteUrl, { signal: controller.signal }).then(upstream => {
+      if (!upstream.ok) {
+        return res.status(502).json({ error: "Upstream audio fetch failed" });
+      }
+
+      // Forward content headers
+      res.setHeader("Content-Type", upstream.headers.get("content-type") || "audio/mpeg");
+      const cl = upstream.headers.get("content-length");
+      if (cl) res.setHeader("Content-Length", cl);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+
+      // Pipe the audio body to the client, with error handling
+      const { Readable } = require("stream");
+      const readable = Readable.fromWeb(upstream.body);
+      readable.on("error", (e) => {
+        // Client disconnected or upstream closed — not a crash-worthy event
+        if (e.code === "ECONNRESET" || e.name === "AbortError" || controller.signal.aborted) return;
+        console.error("Audio proxy stream error:", e.message);
+      });
+      readable.pipe(res);
+    }).catch(e => {
+      if (e.name === "AbortError" || controller.signal.aborted) return; // client disconnected
+      console.error("Audio proxy error:", e.message);
+      if (!res.headersSent) res.status(502).json({ error: "Audio proxy failed" });
     });
   });
 });

@@ -41,6 +41,11 @@ export default function App() {
   const setMixerMode = useDJStore((s) => s.setMixerMode);
   const setCurrentDJ = useDJStore((s) => s.setCurrentDJ);
 
+  // Track whether the Mixer has been opened at least once this session.
+  // Once opened, keep it mounted (hidden) so <audio> elements stay alive
+  // and the master bus keeps feeding Broadcast / Visualizer.
+  const [mixerMounted, setMixerMounted] = useState(false);
+
   // Sync user into global store on login / mount
   useEffect(() => {
     if (user) setCurrentDJ(user);
@@ -58,14 +63,17 @@ export default function App() {
       clearToken();
       setUser(null);
       setCurrentDJ(null);
+      setMixerMounted(false);
       navigate("/");
       return;
     }
+    if (p === "mixer") setMixerMounted(true);
     navigate("/" + p);
   };
 
   const handleStartSession = (mode) => {
     setMixerMode(mode);
+    setMixerMounted(true);
     navigate("/mixer");
   };
 
@@ -90,9 +98,16 @@ export default function App() {
         <main className="main-content">
           <ErrorBoundary fallbackMessage="This page crashed. Try navigating to another page.">
             <Suspense fallback={<PageSpinner />}>
+              {/* Keep Mixer mounted (hidden) once opened so <audio> elements stay alive
+                  and the master bus keeps feeding Broadcast / Visualizer pages */}
+              {mixerMounted && (
+                <div style={{ display: location.pathname === "/mixer" ? "block" : "none" }}>
+                  <Mixer mode={mixerMode} onBack={() => navigate("/dashboard")} />
+                </div>
+              )}
               <Routes>
                 <Route path="/dashboard" element={<DJDashboard onStartSession={handleStartSession} />} />
-                <Route path="/mixer" element={<Mixer mode={mixerMode} onBack={() => navigate("/dashboard")} />} />
+                <Route path="/mixer" element={null} />
                 <Route path="/visualizer" element={<Visualizer />} />
                 <Route path="/broadcast" element={<Broadcast />} />
                 <Route path="/bookings" element={<Bookings />} />

@@ -243,10 +243,14 @@ export default function Deck({ name, audioSrc, onAnalyser, onTrackEnd, onBpmDete
     setLoopBeats(0);
   };
 
-  const play = () => {
+  const play = async () => {
     initAudio();
-    resumeAudio();
-    audioRef.current.play();
+    await resumeAudio();               // ensure AudioContext is running
+    try {
+      await audioRef.current.play();
+    } catch (e) {
+      console.error("Deck play error:", e);
+    }
     setPlaying(true);
   };
 
@@ -426,7 +430,8 @@ export default function Deck({ name, audioSrc, onAnalyser, onTrackEnd, onBpmDete
       </div>
 
       <audio ref={audioRef} src={audioSrc} preload="auto" crossOrigin="anonymous"
-        onEnded={() => { setPlaying(false); if (onTrackEnd) onTrackEnd(); }} />
+        onEnded={() => { setPlaying(false); if (onTrackEnd) onTrackEnd(); }}
+        onError={(e) => console.error(`Deck ${name} audio error:`, e.target.error)} />
 
       <canvas ref={canvasRef} width="300" height="80" className="waveform-canvas"
         onClick={handleCanvasClick} title="Click to seek" style={{ cursor: "pointer" }} />

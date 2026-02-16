@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { apiFetch } from "../utils/api";
+import { apiFetch, getToken } from "../utils/api";
 
 const SORT_OPTIONS = [
   { value: "title", label: "Title A-Z" },
@@ -111,7 +111,10 @@ export default function MusicLibrary({ onLoadTrack, onAddToPlaylist, onAddToQueu
     try {
       const data = await apiFetch(`/music/tracks/${track.id}/stream`);
       if (data.stream_url && onLoadTrack) {
-        onLoadTrack({ ...track, stream_url: data.stream_url });
+        // Append JWT token so <audio> element can authenticate to the proxy
+        const sep = data.stream_url.includes("?") ? "&" : "?";
+        const authedUrl = `${data.stream_url}${sep}token=${getToken()}`;
+        onLoadTrack({ ...track, stream_url: authedUrl });
       }
     } catch (e) {
       console.error("Stream failed:", e);
