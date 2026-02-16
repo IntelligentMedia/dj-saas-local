@@ -1,4 +1,4 @@
-const API = "http://localhost:4000";
+const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
 export function getToken() {
   return localStorage.getItem("token");
@@ -30,7 +30,7 @@ export async function api(path, options = {}) {
   const res = await fetch(API + path, { ...options, headers });
   if (res.status === 401 || res.status === 403) {
     clearToken();
-    window.location.hash = "#/login";
+    window.location.href = "/login";
     throw new Error("Unauthorized");
   }
   return res;

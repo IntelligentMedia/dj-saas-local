@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, Suspense, lazy } from "react";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { getUser, clearToken } from "./utils/api";
 import useDJStore from "./store/djStore";
 import Navbar from "./components/Navbar";
@@ -32,10 +33,9 @@ function PageSpinner() {
 
 export default function App() {
   const [user, setUser] = useState(getUser());
+  const navigate = useNavigate();
+  const location = useLocation();
   const STAFF_ROLES = ["admin","sysadmin","accountant","support","sales","marketing"];
-  const defaultPage = user?.role === "pub" ? "listener" : STAFF_ROLES.includes(user?.role) ? "admin" : "dashboard";
-  const [page, setPage] = useState(defaultPage);
-  const [authView, setAuthView] = useState("landing"); // landing | login
 
   const mixerMode = useDJStore((s) => s.mixerMode);
   const setMixerMode = useDJStore((s) => s.setMixerMode);
@@ -49,7 +49,8 @@ export default function App() {
   const handleLogin = (userData) => {
     setUser(userData);
     setCurrentDJ(userData);
-    setPage(userData?.role === "pub" ? "listener" : ["admin","sysadmin","accountant","support","sales","marketing"].includes(userData?.role) ? "admin" : "dashboard");
+    const dest = userData?.role === "pub" ? "/listener" : STAFF_ROLES.includes(userData?.role) ? "/admin" : "/dashboard";
+    navigate(dest);
   };
 
   const handleNavigate = (p) => {
@@ -57,24 +58,28 @@ export default function App() {
       clearToken();
       setUser(null);
       setCurrentDJ(null);
+      navigate("/");
+      return;
     }
-    setPage(p);
+    navigate("/" + p);
   };
 
   const handleStartSession = (mode) => {
     setMixerMode(mode);
-    setPage("mixer");
+    navigate("/mixer");
   };
 
   if (!user) {
-    if (authView === "login") {
-      return <Login onLogin={handleLogin} onBack={() => setAuthView("landing")} />;
-    }
     return (
-      <LandingPage
-        onGoLogin={() => setAuthView("login")}
-        onGoRegister={() => setAuthView("login")}
-      />
+      <Routes>
+        <Route path="/login" element={<Login onLogin={handleLogin} onBack={() => navigate("/")} />} />
+        <Route path="*" element={
+          <LandingPage
+            onGoLogin={() => navigate("/login")}
+            onGoRegister={() => navigate("/login")}
+          />
+        } />
+      </Routes>
     );
   }
 
@@ -85,16 +90,23 @@ export default function App() {
         <main className="main-content">
           <ErrorBoundary fallbackMessage="This page crashed. Try navigating to another page.">
             <Suspense fallback={<PageSpinner />}>
-              {page === "dashboard" && <DJDashboard onStartSession={handleStartSession} />}
-              {page === "mixer" && <Mixer mode={mixerMode} onBack={() => setPage("dashboard")} />}
-              {page === "visualizer" && <Visualizer />}
-              {page === "broadcast" && <Broadcast />}
-              {page === "bookings" && <Bookings />}
-              {page === "infrastructure" && <Infrastructure />}
-              {page === "listener" && <PubListener />}
-              {page === "profile" && <DJProfile />}
-              {page === "settings" && <DJSettings />}
-              {page === "admin" && ["admin","sysadmin","accountant","support","sales","marketing"].includes(user.role) && <Admin />}
+              <Routes>
+                <Route path="/dashboard" element={<DJDashboard onStartSession={handleStartSession} />} />
+                <Route path="/mixer" element={<Mixer mode={mixerMode} onBack={() => navigate("/dashboard")} />} />
+                <Route path="/visualizer" element={<Visualizer />} />
+                <Route path="/broadcast" element={<Broadcast />} />
+                <Route path="/bookings" element={<Bookings />} />
+                <Route path="/infrastructure" element={<Infrastructure />} />
+                <Route path="/listener" element={<PubListener />} />
+                <Route path="/profile" element={<DJProfile />} />
+                <Route path="/settings" element={<DJSettings />} />
+                <Route path="/admin" element={
+                  STAFF_ROLES.includes(user.role) ? <Admin /> : <Navigate to="/dashboard" />
+                } />
+                <Route path="*" element={
+                  <Navigate to={user.role === "pub" ? "/listener" : STAFF_ROLES.includes(user.role) ? "/admin" : "/dashboard"} />
+                } />
+              </Routes>
             </Suspense>
           </ErrorBoundary>
         </main>

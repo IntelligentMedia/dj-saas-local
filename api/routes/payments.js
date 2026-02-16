@@ -165,8 +165,10 @@ router.get("/transactions", auth, (req, res) => {
   });
 });
 
-// POST /payments/process-booking/:bookingId — process payment for a completed booking
+// POST /payments/process-booking/:bookingId — process payment for a completed booking (admin/accountant only)
 router.post("/process-booking/:bookingId", auth, (req, res) => {
+  const allowed = ["admin", "sysadmin", "accountant"];
+  if (!allowed.includes(req.user.role)) return res.status(403).json({ error: "Not authorized" });
   const bookingId = req.params.bookingId;
 
   db.query(

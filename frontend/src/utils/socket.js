@@ -1,7 +1,8 @@
 import { io } from "socket.io-client";
 import useDJStore from "../store/djStore";
+import { getToken } from "./api";
 
-const SOCKET_URL = "http://localhost:4000";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
 
 let socket = null;
 
@@ -13,6 +14,7 @@ export function getSocket() {
     socket = io(SOCKET_URL, {
       autoConnect: false,
       transports: ["websocket", "polling"],
+      auth: { token: getToken() },
     });
 
     // ── Incoming events → update Zustand store ──

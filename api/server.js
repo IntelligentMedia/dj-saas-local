@@ -1,9 +1,12 @@
 
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
 const rateLimit = require("express-rate-limit");
+const jwt = require("jsonwebtoken");
+const { SECRET } = require("./middleware/auth");
 
 const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
@@ -22,12 +25,26 @@ const app = express();
 const server = http.createServer(app);
 
 // ── Socket.IO — multiplayer sync ──
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
+  cors: { origin: CORS_ORIGIN, methods: ["GET", "POST"] },
 });
 
-app.use(cors());
+app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
+
+// ── Socket.IO authentication middleware ──
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error("Authentication required"));
+  try {
+    const payload = jwt.verify(token, SECRET);
+    socket.data.user = payload;
+    next();
+  } catch {
+    next(new Error("Invalid token"));
+  }
+});
 
 // ── Request logger ──
 app.use((req, res, next) => {
@@ -212,4 +229,5 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(4000, () => console.log("DJ SaaS Unified API v4.0.0 running on port 4000 (HTTP + Socket.IO)"));
+const PORT = process.env.PORT || 4000;
+server.listen(PORT, () => console.log(`DJ SaaS Unified API v4.0.0 running on port ${PORT} (HTTP + Socket.IO)`));

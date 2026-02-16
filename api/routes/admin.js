@@ -5,6 +5,15 @@ const { auth, adminOnly, staffOnly, can, STAFF_ROLES, ALL_ROLES } = require("../
 
 const router = express.Router();
 
+// ── Audit logger helper ──
+function auditLog(userId, action, targetType, targetId, details, ip) {
+  db.query(
+    "INSERT INTO audit_log(user_id, action, target_type, target_id, details, ip_address) VALUES(?,?,?,?,?,?)",
+    [userId, action, targetType, targetId, typeof details === "string" ? details : JSON.stringify(details), ip],
+    () => {} // fire-and-forget
+  );
+}
+
 // GET /admin/me — return current user's permissions for frontend rendering
 router.get("/me", auth, staffOnly, (req, res) => {
   const role = req.user.role;
@@ -33,14 +42,17 @@ router.post("/create-user", auth, adminOnly, async (req, res) => {
     [username, hash, role || "pub"],
     (err) => {
       if (err) return res.status(500).json({ error: "Creation failed" });
+      auditLog(req.user.id, "create_user", "user", null, { username, role: role || "pub" }, req.ip);
       res.json({ ok: true });
     });
 });
 
-// Delete user (admin, sysadmin only)
+// Delete user (admin, sysadmin only) — prevents self-deletion
 router.delete("/delete-user/:id", auth, adminOnly, (req, res) => {
+  if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: "Cannot delete yourself" });
   db.query("DELETE FROM users WHERE id=?", [req.params.id], (err) => {
     if (err) return res.status(500).json({ error: "Delete failed" });
+    auditLog(req.user.id, "delete_user", "user", parseInt(req.params.id), null, req.ip);
     res.json({ ok: true });
   });
 });
@@ -49,6 +61,7 @@ router.delete("/delete-user/:id", auth, adminOnly, (req, res) => {
 router.post("/approve/:id", auth, can("users"), (req, res) => {
   db.query("UPDATE users SET approved=1 WHERE id=?", [req.params.id], (err) => {
     if (err) return res.status(500).json({ error: "Approval failed" });
+    auditLog(req.user.id, "approve_user", "user", parseInt(req.params.id), null, req.ip);
     res.json({ ok: true });
   });
 });
@@ -166,6 +179,7 @@ router.put("/payment-settings", auth, can("payment_settings"), (req, res) => {
         done++;
         if (done === entries.length) {
           if (errors) return res.status(500).json({ error: `${errors} setting(s) failed to update` });
+          auditLog(req.user.id, "update_payment_settings", "payment_settings", null, Object.keys(req.body).join(", "), req.ip);
           res.json({ ok: true, updated: entries.length });
         }
       }

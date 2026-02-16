@@ -33,7 +33,7 @@ export class ErrorBoundary extends React.Component {
               <button className="deck-btn" onClick={this.handleReset}>🔄 Try Again</button>
               <button className="deck-btn" onClick={() => window.location.reload()}>🔃 Reload Page</button>
             </div>
-            {process.env.NODE_ENV !== "production" && this.state.errorInfo && (
+            {import.meta.env.DEV && this.state.errorInfo && (
               <details className="error-details">
                 <summary>Stack Trace</summary>
                 <pre>{this.state.errorInfo.componentStack}</pre>

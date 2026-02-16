@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, apiFetch, getUser } from "../utils/api";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const ROLE_LABELS = {
   dj: "🎧 DJ", pub: "🍻 Pub", admin: "🛡️ Admin",
@@ -25,9 +26,11 @@ export default function Admin() {
   const [libPages, setLibPages] = useState(1);
   const [newTrack, setNewTrack] = useState({ title: "", artist: "", genre: "House", bpm: 120, stream_url: "" });
 
-  // Payment Settings
   const [paySettings, setPaySettings] = useState({});
   const [payPlans, setPayPlans] = useState([]);
+
+  // Confirm dialog state
+  const [confirmAction, setConfirmAction] = useState(null); // { title, message, onConfirm }
   const [paySummary, setPaySummary] = useState(null);
   const [payMsg, setPayMsg] = useState("");
   const [editPlan, setEditPlan] = useState(null);
@@ -192,13 +195,19 @@ export default function Admin() {
   };
 
   const deletePlan = async (id) => {
-    if (!confirm("Delete this plan?")) return;
-    try {
-      await apiFetch(`/admin/plans/${id}`, { method: "DELETE" });
-      loadPayPlans();
-      setPayMsg("Plan deleted");
-      setTimeout(() => setPayMsg(""), 2000);
-    } catch { setPayMsg("Delete failed"); }
+    setConfirmAction({
+      title: "Delete Plan",
+      message: "This will permanently remove this subscription plan. Existing subscribers won't be affected.",
+      onConfirm: async () => {
+        setConfirmAction(null);
+        try {
+          await apiFetch(`/admin/plans/${id}`, { method: "DELETE" });
+          loadPayPlans();
+          setPayMsg("Plan deleted");
+          setTimeout(() => setPayMsg(""), 2000);
+        } catch { setPayMsg("Delete failed"); }
+      }
+    });
   };
 
   const togglePlan = async (id) => {
@@ -243,11 +252,18 @@ export default function Admin() {
   };
 
   const deleteTrack = async (id) => {
-    try {
-      await apiFetch(`/music/admin/tracks/${id}`, { method: "DELETE" });
-      loadLibStats();
-      loadLibTracks();
-    } catch {}
+    setConfirmAction({
+      title: "Remove Track",
+      message: "This track will be permanently removed from the music library.",
+      onConfirm: async () => {
+        setConfirmAction(null);
+        try {
+          await apiFetch(`/music/admin/tracks/${id}`, { method: "DELETE" });
+          loadLibStats();
+          loadLibTracks();
+        } catch {}
+      }
+    });
   };
 
   const createUser = async () => {
@@ -265,8 +281,16 @@ export default function Admin() {
   };
 
   const deleteUser = async (id) => {
-    const res = await api("/admin/delete-user/" + id, { method: "DELETE" });
-    if (res.ok) loadUsers();
+    const targetUser = users.find(u => u.id === id);
+    setConfirmAction({
+      title: "Delete User",
+      message: `Permanently delete user "${targetUser?.username || id}"? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmAction(null);
+        const res = await api("/admin/delete-user/" + id, { method: "DELETE" });
+        if (res.ok) loadUsers();
+      }
+    });
   };
 
   const approveUser = async (id) => {
@@ -1279,6 +1303,16 @@ export default function Admin() {
           </div>
         )}
       </div>
+      )}
+
+      {/* Confirm Dialog */}
+      {confirmAction && (
+        <ConfirmDialog
+          title={confirmAction.title}
+          message={confirmAction.message}
+          onConfirm={confirmAction.onConfirm}
+          onCancel={() => setConfirmAction(null)}
+        />
       )}
     </div>
   );

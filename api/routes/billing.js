@@ -1,6 +1,6 @@
 const express = require("express");
 const db = require("../db");
-const { auth, adminOnly } = require("../middleware/auth");
+const { auth, can } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -10,7 +10,7 @@ const DEFAULT_PLATFORM_FEE = 20;
 
 // GET /billing/run — calculate billing for all completed/active bookings
 // Uses the DJ's subscription commission rate if available
-router.get("/run", auth, (req, res) => {
+router.get("/run", auth, can("billing"), (req, res) => {
   db.query(
     `SELECT b.*, u1.username as dj_name, u2.username as pub_name,
             IFNULL(sp.commission_rate, ${DEFAULT_PLATFORM_FEE}) as commission_rate,
@@ -59,7 +59,7 @@ router.get("/run", auth, (req, res) => {
 // ─── Realtime Earnings (from realtime-earnings) ───
 
 // GET /billing/realtime-earnings — calculate live session earnings based on elapsed time
-router.get("/realtime-earnings", auth, (req, res) => {
+router.get("/realtime-earnings", auth, can("billing"), (req, res) => {
   db.query(
     `SELECT s.*, b.rate, b.hours as booked_hours, u.username as dj_name,
             IFNULL(sp.commission_rate, ${DEFAULT_PLATFORM_FEE}) as commission_rate

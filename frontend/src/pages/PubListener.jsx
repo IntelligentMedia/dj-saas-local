@@ -70,7 +70,7 @@ export default function PubListener() {
       await apiFetch("/profile/ratings", {
         method: "POST",
         body: JSON.stringify({
-          dj_id: null,  // will be filled based on session
+          dj_id: roomRef.current?.djId || null,
           rating: myRating,
           comment: ratingComment.trim() || null,
         }),
@@ -100,6 +100,14 @@ export default function PubListener() {
       setListeners(count);
       if (dj) setDjName(dj);
     };
+
+    // Fetch DJ id from live rooms to associate ratings
+    apiFetch("/rooms/live").then(rooms => {
+      if (rooms?.length > 0 && rooms[0].dj_id) {
+        if (!roomRef.current) roomRef.current = {};
+        roomRef.current.djId = rooms[0].dj_id;
+      }
+    }).catch(() => {});
 
     socket.on("energy", handleEnergy);
     socket.on("reaction", handleReaction);

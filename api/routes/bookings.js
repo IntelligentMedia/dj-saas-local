@@ -47,19 +47,37 @@ router.post("/", auth, (req, res) => {
   });
 });
 
-// POST /bookings/:id/confirm — confirm a booking (admin/dj)
+// POST /bookings/:id/confirm — confirm a booking (only the booked DJ or admin)
 router.post("/:id/confirm", auth, (req, res) => {
-  db.query("UPDATE bookings SET status='confirmed' WHERE id=?", [req.params.id], (err) => {
-    if (err) return res.status(500).json({ error: "Confirm failed" });
-    res.json({ ok: true });
+  db.query("SELECT * FROM bookings WHERE id=?", [req.params.id], (err, rows) => {
+    if (err) return res.status(500).json({ error: "DB error" });
+    if (!rows || rows.length === 0) return res.status(404).json({ error: "Booking not found" });
+    const booking = rows[0];
+    // Only the booked DJ or admin/sysadmin can confirm
+    if (booking.dj_id !== req.user.id && req.user.role !== "admin" && req.user.role !== "sysadmin") {
+      return res.status(403).json({ error: "Not authorized to confirm this booking" });
+    }
+    db.query("UPDATE bookings SET status='confirmed' WHERE id=?", [req.params.id], (err) => {
+      if (err) return res.status(500).json({ error: "Confirm failed" });
+      res.json({ ok: true });
+    });
   });
 });
 
-// POST /bookings/:id/cancel — cancel a booking
+// POST /bookings/:id/cancel — cancel a booking (only involved parties or admin)
 router.post("/:id/cancel", auth, (req, res) => {
-  db.query("UPDATE bookings SET status='cancelled', active=0 WHERE id=?", [req.params.id], (err) => {
-    if (err) return res.status(500).json({ error: "Cancel failed" });
-    res.json({ ok: true });
+  db.query("SELECT * FROM bookings WHERE id=?", [req.params.id], (err, rows) => {
+    if (err) return res.status(500).json({ error: "DB error" });
+    if (!rows || rows.length === 0) return res.status(404).json({ error: "Booking not found" });
+    const booking = rows[0];
+    // Only DJ, pub who booked, or admin can cancel
+    if (booking.dj_id !== req.user.id && booking.pub_id !== req.user.id && req.user.role !== "admin" && req.user.role !== "sysadmin") {
+      return res.status(403).json({ error: "Not authorized to cancel this booking" });
+    }
+    db.query("UPDATE bookings SET status='cancelled', active=0 WHERE id=?", [req.params.id], (err) => {
+      if (err) return res.status(500).json({ error: "Cancel failed" });
+      res.json({ ok: true });
+    });
   });
 });
 

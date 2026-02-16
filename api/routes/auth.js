@@ -13,13 +13,8 @@ router.post("/login", (req, res) => {
 
   db.query("SELECT * FROM users WHERE username=?", [username], async (err, rows) => {
     if (err) {
-      // Demo fallback if MySQL is down
-      if (password === "1234") {
-        const role = username.startsWith("admin") ? "admin" : username.startsWith("dj") ? "dj" : "pub";
-        const token = jwt.sign({ id: 1, username, role }, SECRET, { expiresIn: "2h" });
-        return res.json({ token, user: { username, role } });
-      }
-      return res.status(401).json({ error: "Invalid credentials" });
+      console.error("Login DB error:", err.message);
+      return res.status(500).json({ error: "Database unavailable" });
     }
 
     if (!rows || rows.length === 0) return res.status(401).json({ error: "Invalid credentials" });
@@ -31,7 +26,8 @@ router.post("/login", (req, res) => {
     if (!match) return res.status(401).json({ error: "Invalid credentials" });
 
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET, { expiresIn: "2h" });
-    const refreshToken = jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET + "_REFRESH", { expiresIn: "7d" });
+    const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || (SECRET + "_REFRESH");
+    const refreshToken = jwt.sign({ id: user.id, username: user.username, role: user.role }, REFRESH_SECRET, { expiresIn: "7d" });
 
     // Store refresh token in DB (survives restarts)
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -44,14 +40,16 @@ router.post("/login", (req, res) => {
 
 // Register
 router.post("/register", async (req, res) => {
-  const { username, password, role } = req.body;
+  const { username, password, email, role } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Username and password required" });
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "Invalid email format" });
 
   const hash = await bcrypt.hash(password, 10);
   const userRole = role === "dj" ? "dj" : "pub";
 
-  db.query("INSERT INTO users(username,password,role,approved) VALUES(?,?,?,?)",
-    [username, hash, userRole, userRole === "pub" ? 1 : 0],
+  db.query("INSERT INTO users(username,email,password,role,approved) VALUES(?,?,?,?,?)",
+    [username, email || null, hash, userRole, userRole === "pub" ? 1 : 0],
     (err) => {
       if (err) {
         if (err.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "Username taken" });
@@ -71,7 +69,8 @@ router.post("/token", (req, res) => {
     if (err || !rows || rows.length === 0) return res.status(403).json({ error: "Invalid refresh token" });
 
     try {
-      const payload = jwt.verify(refreshToken, SECRET + "_REFRESH");
+      const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || (SECRET + "_REFRESH");
+      const payload = jwt.verify(refreshToken, REFRESH_SECRET);
       const newToken = jwt.sign({ id: payload.id, username: payload.username, role: payload.role }, SECRET, { expiresIn: "2h" });
       res.json({ token: newToken });
     } catch {

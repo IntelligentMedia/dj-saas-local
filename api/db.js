@@ -2,10 +2,10 @@ const mysql = require("mysql2");
 
 // Connection pool — handles concurrent queries without bottleneck
 const pool = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "dj_saas",
+  host: process.env.DB_HOST || "localhost",
+  user: process.env.DB_USER || "root",
+  password: process.env.DB_PASSWORD || "",
+  database: process.env.DB_NAME || "dj_saas",
   waitForConnections: true,
   connectionLimit: 20,
   queueLimit: 0,
