@@ -2,6 +2,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const http = require("http");
 const { Server } = require("socket.io");
 const rateLimit = require("express-rate-limit");
@@ -30,8 +31,13 @@ const io = new Server(server, {
   cors: { origin: CORS_ORIGIN, methods: ["GET", "POST"] },
 });
 
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },  // allow audio proxy
+  contentSecurityPolicy: false,                             // frontend handles CSP
+}));
 app.use(cors({ origin: CORS_ORIGIN }));
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: false, limit: "2mb" }));
 
 // ── Socket.IO authentication middleware ──
 io.use((socket, next) => {
@@ -97,6 +103,20 @@ app.use("/infra", infraRoutes);
 app.use("/payments", paymentRoutes);
 app.use("/music", musicRoutes);
 app.use("/profile", profileRoutes);
+
+// ── 404 handler ──
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
+// ── Global error handler ──
+app.use((err, req, res, _next) => {
+  console.error("Unhandled error:", err.stack || err);
+  if (res.headersSent) return;
+  const status = err.status || err.statusCode || 500;
+  const message = process.env.NODE_ENV === "production" ? "Internal server error" : err.message;
+  res.status(status).json({ error: message });
+});
 
 // ═══════════════════════════════════════════════════
 //  Socket.IO — Real-time Multiplayer Sync
@@ -296,6 +316,28 @@ io.on("connection", (socket) => {
     }
     console.log(`[Socket.IO] Disconnected: ${socket.id} (${identity || "unknown"})`);
   });
+});
+
+// ── Graceful shutdown ──
+function shutdown(signal) {
+  console.log(`\n${signal} received — shutting down gracefully…`);
+  io.close();
+  server.close(() => {
+    console.log("HTTP server closed.");
+    process.exit(0);
+  });
+  setTimeout(() => { console.error("Forced shutdown after timeout"); process.exit(1); }, 10000);
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT",  () => shutdown("SIGINT"));
+
+// ── Catch uncaught errors (prevent silent crashes) ──
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+  shutdown("uncaughtException");
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED REJECTION:", reason);
 });
 
 const PORT = process.env.PORT || 4000;
