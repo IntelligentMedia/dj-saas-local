@@ -153,6 +153,7 @@ export default function Mixer({ mode = "classic", onBack }) {
   });
 
   const deckSetters = { A: setTrackA, B: setTrackB, C: setTrackC, D: setTrackD };
+  const deckSrcs = { A: trackA, B: trackB, C: trackC, D: trackD };
 
   // ── Auto-queue state ──
   const [queue, setQueue] = useState([]);  // queue items: track objects or URLs
@@ -162,6 +163,10 @@ export default function Mixer({ mode = "classic", onBack }) {
   const [showJogWheels, setShowJogWheels] = useState(false);
   const jogPopupRef = useRef(null);
   const lastLoadedDeck = useRef(null);
+
+  // ── Pro mode deck layer switching (A/C on left, B/D on right) ──
+  const [leftDeck, setLeftDeck] = useState("A");
+  const [rightDeck, setRightDeck] = useState("B");
 
   // ── Pop out Jog Wheels into a separate window for multi-screen ──
   const popOutJogWheels = useCallback(() => {
@@ -969,36 +974,146 @@ export default function Mixer({ mode = "classic", onBack }) {
         </>
       )}
 
-      {/* ═══ PRO: 4 Decks ═══ */}
+      {/* ═══ PRO: Hardware Controller Layout (Pioneer-style) ═══ */}
       {mode === "pro" && (
-        <>
-          <div className="decks-container pro-4deck">
-            <Deck name="A" audioSrc={trackA} onTrackEnd={() => handleTrackEnd("A")} onBpmDetect={handleBpmDetect} playbackRate={deckRates.A} trackTitle={trackMeta.A?.title} trackArtist={trackMeta.A?.artist} isMuted={isEffectivelyMuted("A")} isSolo={deckSolos.A} onToggleMute={() => toggleMute("A")} onToggleSolo={() => toggleSolo("A")} />
-            <Deck name="B" audioSrc={trackB} onTrackEnd={() => handleTrackEnd("B")} onBpmDetect={handleBpmDetect} playbackRate={deckRates.B} trackTitle={trackMeta.B?.title} trackArtist={trackMeta.B?.artist} isMuted={isEffectivelyMuted("B")} isSolo={deckSolos.B} onToggleMute={() => toggleMute("B")} onToggleSolo={() => toggleSolo("B")} />
-            <Deck name="C" audioSrc={trackC} onTrackEnd={() => handleTrackEnd("C")} onBpmDetect={handleBpmDetect} playbackRate={deckRates.C} trackTitle={trackMeta.C?.title} trackArtist={trackMeta.C?.artist} isMuted={isEffectivelyMuted("C")} isSolo={deckSolos.C} onToggleMute={() => toggleMute("C")} onToggleSolo={() => toggleSolo("C")} />
-            <Deck name="D" audioSrc={trackD} onTrackEnd={() => handleTrackEnd("D")} onBpmDetect={handleBpmDetect} playbackRate={deckRates.D} trackTitle={trackMeta.D?.title} trackArtist={trackMeta.D?.artist} isMuted={isEffectivelyMuted("D")} isSolo={deckSolos.D} onToggleMute={() => toggleMute("D")} onToggleSolo={() => toggleSolo("D")} />
+        <div className="hw-controller">
+          {/* ── Top Screen: Waveforms + Deck Info ── */}
+          <div className="hw-screen">
+            <div className="hw-screen-half">
+              {["A", "C"].map(d => (
+                <div key={d} style={{ display: leftDeck === d ? "block" : "none" }}>
+                  <Deck name={d} audioSrc={deckSrcs[d]} onTrackEnd={() => handleTrackEnd(d)} onBpmDetect={handleBpmDetect} playbackRate={deckRates[d]} trackTitle={trackMeta[d]?.title} trackArtist={trackMeta[d]?.artist} isMuted={isEffectivelyMuted(d)} isSolo={deckSolos[d]} onToggleMute={() => toggleMute(d)} onToggleSolo={() => toggleSolo(d)} />
+                </div>
+              ))}
+            </div>
+            <div className="hw-screen-half">
+              {["B", "D"].map(d => (
+                <div key={d} style={{ display: rightDeck === d ? "block" : "none" }}>
+                  <Deck name={d} audioSrc={deckSrcs[d]} onTrackEnd={() => handleTrackEnd(d)} onBpmDetect={handleBpmDetect} playbackRate={deckRates[d]} trackTitle={trackMeta[d]?.title} trackArtist={trackMeta[d]?.artist} isMuted={isEffectivelyMuted(d)} isSolo={deckSolos[d]} onToggleMute={() => toggleMute(d)} onToggleSolo={() => toggleSolo(d)} />
+                </div>
+              ))}
+            </div>
           </div>
-          <div data-panel="fx-panel"><FXPanel /></div>
-          <div className="pro-track-selectors">
-            {[
-              { label: "Deck A", val: trackA, set: setTrackA },
-              { label: "Deck B", val: trackB, set: setTrackB },
-              { label: "Deck C", val: trackC, set: setTrackC },
-              { label: "Deck D", val: trackD, set: setTrackD },
-            ].map((d, i) => (
-              <div key={i} className="pro-track-selector">
-                <label>{d.label}</label>
-                <select className="track-select" value={d.val} onChange={e => d.set(e.target.value)}>
-                  {TRACKS.map((t, j) => <option key={j} value={t}>Track {j + 1}</option>)}
-                </select>
+
+          {/* ── Left Deck Unit: Layer select + Jog Wheel ── */}
+          <div className="hw-deck-unit hw-deck-left">
+            <div className="hw-layer-buttons">
+              <button className={`hw-layer-btn ${leftDeck === "A" ? "active" : ""}`} onClick={() => setLeftDeck("A")}>DECK A</button>
+              <button className={`hw-layer-btn ${leftDeck === "C" ? "active" : ""}`} onClick={() => setLeftDeck("C")}>DECK C</button>
+            </div>
+            <JogWheel deckName={leftDeck} bpm={deckBpms[leftDeck] || 120} trackTitle={trackMeta[leftDeck]?.title || ""} trackArtist={trackMeta[leftDeck]?.artist || ""} />
+          </div>
+
+          {/* ── Center Mixer Strip ── */}
+          <div className="hw-mixer-center">
+            {/* FX */}
+            <div className="hw-fx-section" data-panel="fx-panel">
+              <FXPanel />
+            </div>
+
+            {/* Master Volume */}
+            <div className="hw-master-section">
+              <span className="hw-label">MASTER</span>
+              <input type="range" min="0" max="100" value={masterVol}
+                onChange={e => updateMasterVol(Number(e.target.value))}
+                className="hw-master-fader" />
+              <span className="hw-vol-value">{masterVol}%</span>
+            </div>
+
+            {/* BPM Sync */}
+            <div className="hw-bpm-section">
+              <span className="hw-label">BPM SYNC</span>
+              <div className="hw-bpm-display">
+                <span className="hw-bpm-val">{deckBpms[leftDeck] || "--"}</span>
+                <span className="hw-bpm-sep">⚡</span>
+                <span className="hw-bpm-val">{deckBpms[rightDeck] || "--"}</span>
               </div>
-            ))}
+              <div className="hw-sync-btns">
+                <button className="hw-btn" onClick={() => syncBpm(rightDeck)} disabled={!deckBpms[leftDeck] || !deckBpms[rightDeck]}>SYNC →</button>
+                <button className="hw-btn" onClick={() => syncBpm(leftDeck)} disabled={!deckBpms[leftDeck] || !deckBpms[rightDeck]}>← SYNC</button>
+              </div>
+              {(deckRates[leftDeck] !== 1 || deckRates[rightDeck] !== 1) && (
+                <button className="hw-btn" style={{width:"100%"}} onClick={() => { resetSync(leftDeck); resetSync(rightDeck); }}>RESET</button>
+              )}
+            </div>
+
+            {/* Beat Phase */}
+            {(() => {
+              const phase = getPhaseSync();
+              return (
+                <div className="hw-phase">
+                  <div className="hw-phase-bar">
+                    <div className="hw-phase-fill" style={{ width: `${phase.percent}%`, background: phase.color }} />
+                  </div>
+                  <span className="hw-phase-text" style={{ color: phase.color }}>{phase.label}</span>
+                </div>
+              );
+            })()}
+
+            {/* Crossfader Curve */}
+            <div className="hw-curve-section">
+              <span className="hw-label">CURVE</span>
+              <div className="hw-curve-btns">
+                {["smooth", "linear", "cut"].map(c => (
+                  <button key={c} className={`hw-curve-btn ${crossCurve === c ? "active" : ""}`}
+                    onClick={() => handleCurveChange(c)}>
+                    {c === "smooth" ? "~" : c === "linear" ? "/" : "▌"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Crossfader */}
+            <div className="hw-crossfader-section">
+              <span className="hw-label">CROSSFADER</span>
+              <div className="hw-xfader-track">
+                <span className="hw-xf-label">{leftDeck}</span>
+                <input type="range" min="0" max="100" value={cross}
+                  onChange={e => updateCross(Number(e.target.value))}
+                  className="hw-crossfader" />
+                <span className="hw-xf-label">{rightDeck}</span>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="hw-actions">
+              <button className={`hw-btn ${aiActive ? "active" : ""}`}
+                onClick={aiActive ? stopAiCrossfade : aiCrossfade}>
+                {aiActive ? "⏹ STOP" : "🤖 AI MIX"}
+              </button>
+              <button className={`hw-btn ${autoQueue ? "active" : ""}`}
+                onClick={() => setAutoQueue(!autoQueue)}>
+                {autoQueue ? "🔁 ON" : "🔁 OFF"}
+              </button>
+            </div>
+
+            {/* Panel Toggles */}
+            <div className="hw-toggles">
+              <button className={`hw-btn ${showQueue ? "active" : ""}`} onClick={() => setShowQueue(!showQueue)}>
+                📋 {queue.length > 0 ? `(${queue.length})` : ""}
+              </button>
+              <button className={`hw-btn ${showSampler ? "active" : ""}`} onClick={() => setShowSampler(!showSampler)}>
+                🎹
+              </button>
+              <button className={`hw-btn ${showRequests ? "active" : ""}`} onClick={() => setShowRequests(!showRequests)}>
+                🎵 {songRequests.length > 0 ? `(${songRequests.length})` : ""}
+              </button>
+            </div>
           </div>
-        </>
+
+          {/* ── Right Deck Unit: Layer select + Jog Wheel ── */}
+          <div className="hw-deck-unit hw-deck-right">
+            <div className="hw-layer-buttons">
+              <button className={`hw-layer-btn ${rightDeck === "B" ? "active" : ""}`} onClick={() => setRightDeck("B")}>DECK B</button>
+              <button className={`hw-layer-btn ${rightDeck === "D" ? "active" : ""}`} onClick={() => setRightDeck("D")}>DECK D</button>
+            </div>
+            <JogWheel deckName={rightDeck} bpm={deckBpms[rightDeck] || 120} trackTitle={trackMeta[rightDeck]?.title || ""} trackArtist={trackMeta[rightDeck]?.artist || ""} />
+          </div>
+        </div>
       )}
 
-      {/* ═══ Crossfader (all modes) ═══ */}
-      <div className="crossfader-section">
+      {/* ═══ Crossfader (non-pro modes — pro uses hardware layout) ═══ */}
+      {mode !== "pro" && <div className="crossfader-section">
         <h3>🎛️ Crossfader</h3>
         <div className="crossfader-labels">
           <span>A</span>
@@ -1135,7 +1250,7 @@ export default function Mixer({ mode = "classic", onBack }) {
             ))}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ═══ Track Queue Panel ═══ */}
       {showQueue && (

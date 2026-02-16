@@ -5019,3 +5019,585 @@ body {
   padding: 8px 0;
 }
 
+
+/* ═══════════════════════════════════════════════════════════════
+   HARDWARE CONTROLLER LAYOUT — Pro Mode (Pioneer XDJ-RX3 style)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Widen mixer page in pro mode */
+.mixer-mode-pro.mixer-page { max-width: 1500px; }
+
+/* Main hardware body — resembles a physical controller */
+.hw-controller {
+  display: grid;
+  grid-template-columns: 1fr 260px 1fr;
+  grid-template-rows: auto 1fr;
+  background: linear-gradient(180deg, #1c1c1c 0%, #151515 40%, #0f0f0f 100%);
+  border-radius: 22px;
+  border: 3px solid #2a2a2a;
+  overflow: hidden;
+  margin: 8px auto;
+  box-shadow:
+    0 10px 50px rgba(0,0,0,0.8),
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    inset 0 -1px 0 rgba(0,0,0,0.5);
+  position: relative;
+}
+/* Subtle brushed-metal texture */
+.hw-controller::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 1px,
+    rgba(255,255,255,0.008) 1px,
+    rgba(255,255,255,0.008) 2px
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+.hw-controller > * { position: relative; z-index: 1; }
+
+/* ── Top Screen (spans all 3 columns) ── */
+.hw-screen {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background: #000;
+  padding: 8px;
+  border-bottom: 3px solid #2a2a2a;
+  border-top-left-radius: 19px;
+  border-top-right-radius: 19px;
+}
+
+.hw-screen-half {
+  background: linear-gradient(180deg, #030310 0%, #060618 100%);
+  border-radius: 6px;
+  padding: 10px;
+  border: 1px solid #14142a;
+  position: relative;
+  overflow: hidden;
+}
+/* LED scan-line effect */
+.hw-screen-half::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,240,255,0.015) 2px,
+    rgba(0,240,255,0.015) 4px
+  );
+  pointer-events: none;
+  z-index: 2;
+}
+/* Top edge glow */
+.hw-screen-half::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0,240,255,0.3), transparent);
+  pointer-events: none;
+}
+
+/* ── Deck overrides inside hardware screen ── */
+.hw-screen-half .deck {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  width: 100%;
+}
+.hw-screen-half .deck-title {
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+  text-shadow: 0 0 12px rgba(0,240,255,0.5);
+}
+.hw-screen-half .deck-track-info {
+  margin-bottom: 4px;
+}
+.hw-screen-half .waveform-canvas {
+  height: 80px;
+  margin-bottom: 6px;
+  border-color: #1a1a30;
+}
+.hw-screen-half .vu-meter {
+  margin-bottom: 4px;
+}
+/* Hide cue + loop sections (JogWheel has these built in) */
+.hw-screen-half .cue-section,
+.hw-screen-half .loop-section {
+  display: none;
+}
+/* Compact EQ in screen */
+.hw-screen-half .eq-presets {
+  gap: 2px;
+  margin-bottom: 4px;
+}
+.hw-screen-half .eq-preset-btn {
+  padding: 2px 6px;
+  font-size: 0.65rem;
+}
+.hw-screen-half .eq-section {
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.hw-screen-half .eq-knob label {
+  font-size: 0.65rem;
+}
+.hw-screen-half .eq-kill-btn {
+  font-size: 0.55rem;
+  padding: 1px 5px;
+}
+/* Compact controls */
+.hw-screen-half .deck-controls {
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.hw-screen-half .deck-controls .deck-btn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+.hw-screen-half .deck-slider {
+  margin-bottom: 4px;
+}
+.hw-screen-half .deck-slider label,
+.hw-screen-half .pitch-section label {
+  font-size: 0.7rem;
+}
+.hw-screen-half .bpm-display {
+  margin-bottom: 4px;
+}
+.hw-screen-half .bpm-value {
+  font-size: 1.2rem;
+}
+
+/* ── Deck Units (Left and Right jog wheel areas) ── */
+.hw-deck-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 10px;
+  background: linear-gradient(180deg, #1a1a1a, #141414, #0e0e0e);
+}
+
+/* Layer Switch Buttons (DECK A/C toggle, DECK B/D toggle) */
+.hw-layer-buttons {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  max-width: 280px;
+}
+.hw-layer-btn {
+  flex: 1;
+  padding: 7px 0;
+  background: linear-gradient(180deg, #1a1a28, #111120);
+  border: 2px solid #2a2a3e;
+  border-radius: 6px;
+  color: #555;
+  font-weight: 700;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+  font-family: 'Inter', monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.hw-layer-btn:hover {
+  border-color: #444;
+  color: #aaa;
+}
+.hw-layer-btn.active {
+  background: linear-gradient(180deg, rgba(0,240,255,0.12), rgba(0,240,255,0.04));
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 14px rgba(0,240,255,0.2), inset 0 0 8px rgba(0,240,255,0.05);
+  text-shadow: 0 0 6px rgba(0,240,255,0.5);
+}
+
+/* JogWheel overrides inside hardware deck unit */
+.hw-deck-unit .jogwheel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  width: 100%;
+}
+/* Hide jog header (deck info is in screen above) */
+.hw-deck-unit .jw-header {
+  display: none;
+}
+/* Platter: larger & centered */
+.hw-deck-unit .jw-platter-container {
+  padding: 4px 0;
+}
+/* Pad styling: hardware-look */
+.hw-deck-unit .jw-hotcue-pad {
+  aspect-ratio: 1.4;
+  border-radius: 4px;
+  border-width: 2px;
+  font-size: 0.85rem;
+  background: #0a0a14;
+}
+.hw-deck-unit .jw-hotcue-pad.set {
+  box-shadow: 0 0 12px currentColor, inset 0 0 6px rgba(255,255,255,0.05);
+}
+.hw-deck-unit .jw-section-label {
+  color: #444;
+  font-size: 0.6rem;
+  letter-spacing: 3px;
+}
+.hw-deck-unit .jw-mode-row {
+  gap: 3px;
+}
+.hw-deck-unit .jw-mode-btn {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  background: linear-gradient(180deg, #151520, #0e0e18);
+}
+.hw-deck-unit .jw-transport {
+  gap: 4px;
+}
+.hw-deck-unit .jw-btn {
+  background: linear-gradient(180deg, #1a1a28, #111118);
+  border-color: #2a2a3e;
+  font-size: 0.72rem;
+  padding: 5px 10px;
+}
+.hw-deck-unit .jw-btn.play {
+  background: linear-gradient(180deg, #1a2a1a, #112011);
+  border-color: #2a3e2a;
+}
+.hw-deck-unit .jw-loop-btn {
+  background: linear-gradient(180deg, #111118, #0a0a10);
+  font-size: 0.68rem;
+  padding: 3px 7px;
+}
+
+/* ── Center Mixer Section ── */
+.hw-mixer-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 8px;
+  background: linear-gradient(180deg, #1e1e1e, #161616, #0f0f0f);
+  border-left: 2px solid #2a2a2a;
+  border-right: 2px solid #2a2a2a;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #333 #111;
+}
+.hw-mixer-center::-webkit-scrollbar {
+  width: 4px;
+}
+.hw-mixer-center::-webkit-scrollbar-track {
+  background: #111;
+}
+.hw-mixer-center::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
+}
+
+/* Label style for hardware sections */
+.hw-label {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #555;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+/* FX Panel compact */
+.hw-fx-section {
+  width: 100%;
+}
+.hw-fx-section .fx-panel {
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+/* Master Volume */
+.hw-master-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 8px;
+  border: 1px solid #1e1e2e;
+}
+.hw-master-fader {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  background: linear-gradient(180deg, #1a1a1a, #0a0a0a);
+  border-radius: 3px;
+  outline: none;
+  border: 1px solid #222;
+}
+.hw-master-fader::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 14px;
+  background: linear-gradient(180deg, #666, #444, #333);
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid #777;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+}
+.hw-vol-value {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--neon-green);
+  text-shadow: 0 0 6px rgba(57,255,20,0.3);
+}
+
+/* BPM Section */
+.hw-bpm-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 8px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 8px;
+  border: 1px solid #1e1e2e;
+}
+.hw-bpm-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hw-bpm-val {
+  font-family: monospace;
+  font-size: 1.15rem;
+  color: #ffdd00;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(255,221,0,0.3);
+}
+.hw-bpm-sep {
+  font-size: 0.8rem;
+  color: #444;
+}
+.hw-sync-btns {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+}
+
+/* Hardware buttons */
+.hw-btn {
+  flex: 1;
+  padding: 6px 4px;
+  background: linear-gradient(180deg, #2a2a2a, #1a1a1a);
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #999;
+  font-size: 0.62rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.12s;
+  font-family: 'Inter', sans-serif;
+}
+.hw-btn:hover {
+  background: linear-gradient(180deg, #363636, #262626);
+  border-color: #444;
+  color: #ddd;
+}
+.hw-btn:active {
+  background: linear-gradient(180deg, #1a1a1a, #2a2a2a);
+  transform: translateY(1px);
+}
+.hw-btn.active {
+  background: linear-gradient(180deg, rgba(0,240,255,0.15), rgba(0,240,255,0.05));
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(0,240,255,0.15);
+}
+.hw-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Phase Meter */
+.hw-phase {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hw-phase-bar {
+  flex: 1;
+  height: 4px;
+  background: #111;
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid #1a1a2a;
+}
+.hw-phase-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+.hw-phase-text {
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-family: monospace;
+  min-width: 40px;
+  text-align: right;
+}
+
+/* Curve Section */
+.hw-curve-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+.hw-curve-btns {
+  display: flex;
+  gap: 3px;
+  width: 100%;
+}
+.hw-curve-btn {
+  flex: 1;
+  padding: 6px 0;
+  background: linear-gradient(180deg, #1a1a1a, #111);
+  border: 1px solid #2a2a3e;
+  border-radius: 4px;
+  color: #666;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.12s;
+  text-align: center;
+}
+.hw-curve-btn:hover {
+  border-color: #444;
+  color: #aaa;
+}
+.hw-curve-btn.active {
+  border-color: var(--neon-pink);
+  color: var(--neon-pink);
+  background: rgba(255,0,255,0.08);
+  box-shadow: 0 0 8px rgba(255,0,255,0.15);
+}
+
+/* Crossfader Section */
+.hw-crossfader-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 8px;
+  background: rgba(0,0,0,0.3);
+  border-radius: 8px;
+  border: 1px solid #1e1e2e;
+}
+.hw-xfader-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.hw-xf-label {
+  font-family: monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--neon-cyan);
+  min-width: 14px;
+  text-align: center;
+  text-shadow: 0 0 6px rgba(0,240,255,0.4);
+}
+.hw-crossfader {
+  -webkit-appearance: none;
+  flex: 1;
+  height: 10px;
+  background: linear-gradient(180deg, #1a1a1a, #0a0a0a);
+  border-radius: 5px;
+  outline: none;
+  border: 1px solid #2a2a3e;
+}
+.hw-crossfader::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 30px;
+  height: 18px;
+  background: linear-gradient(180deg, #777, #555, #444);
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid #888;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+/* Quick Action Buttons */
+.hw-actions {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+}
+
+/* Panel Toggle Buttons */
+.hw-toggles {
+  display: flex;
+  gap: 3px;
+  width: 100%;
+}
+
+/* ── Responsive: medium screens ── */
+@media (max-width: 1200px) {
+  .hw-controller {
+    grid-template-columns: 1fr 220px 1fr;
+    border-radius: 14px;
+  }
+  .hw-deck-unit {
+    padding: 8px 6px;
+  }
+  .hw-mixer-center {
+    padding: 10px 6px;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 900px) {
+  .hw-controller {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+  }
+  .hw-screen {
+    grid-column: 1;
+  }
+  .hw-deck-unit {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .hw-mixer-center {
+    border-left: none;
+    border-right: none;
+    border-top: 2px solid #2a2a2a;
+    border-bottom: 2px solid #2a2a2a;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
