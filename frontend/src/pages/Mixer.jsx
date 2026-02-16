@@ -14,6 +14,7 @@ import MusicLibrary from "../components/MusicLibrary";
 import PlaylistBuilder from "../components/PlaylistBuilder";
 import TrackQueue from "../components/TrackQueue";
 import SamplerPad from "../components/SamplerPad";
+import JogWheel from "../components/JogWheel";
 
 export default function Mixer({ mode = "classic", onBack }) {
   // ── Zustand global state ──
@@ -158,7 +159,87 @@ export default function Mixer({ mode = "classic", onBack }) {
   const [autoQueue, setAutoQueue] = useState(true);
   const [showQueue, setShowQueue] = useState(false);
   const [showSampler, setShowSampler] = useState(false);
+  const [showJogWheels, setShowJogWheels] = useState(false);
+  const jogPopupRef = useRef(null);
   const lastLoadedDeck = useRef(null);
+
+  // ── Pop out Jog Wheels into a separate window for multi-screen ──
+  const popOutJogWheels = useCallback(() => {
+    // Close existing popup if open
+    if (jogPopupRef.current && !jogPopupRef.current.closed) {
+      jogPopupRef.current.focus();
+      return;
+    }
+
+    const left = window.screenX + window.outerWidth;
+    const top = window.screenY;
+    const width = mode === "pro" ? 1380 : 720;
+    const popup = window.open("", "dj-jogwheels", `width=${width},height=${780},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+    if (!popup) { toast.error("Pop-up blocked! Allow pop-ups for multi-screen jog wheels."); return; }
+    jogPopupRef.current = popup;
+
+    popup.document.title = "DJ SaaS — Jog Wheels";
+    popup.document.head.innerHTML = "";
+    popup.document.body.innerHTML = "";
+    popup.document.body.style.cssText = "margin:0;padding:0;background:#06080f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;";
+
+    // Copy stylesheets
+    Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).forEach(s => {
+      popup.document.head.appendChild(s.cloneNode(true));
+    });
+
+    // Create a React root in the popup for live jog wheels
+    const container = popup.document.createElement("div");
+    container.className = "jogwheel-popup";
+    popup.document.body.appendChild(container);
+
+    // Import ReactDOM to render into the popup
+    import("react-dom/client").then(({ createRoot }) => {
+      const decks = mode === "pro" ? ["A", "B", "C", "D"] : ["A", "B"];
+      const root = createRoot(container);
+
+      const renderJogs = () => {
+        const meta = { ...trackMeta };
+        const bpms = { ...deckBpms };
+        root.render(
+          React.createElement("div", { className: "jogwheel-popup" },
+            decks.map(d => React.createElement(JogWheel, {
+              key: d,
+              deckName: d,
+              bpm: bpms[d] || 120,
+              trackTitle: meta[d]?.title || "",
+              trackArtist: meta[d]?.artist || "",
+            }))
+          )
+        );
+      };
+
+      renderJogs();
+
+      // Re-render periodically to keep BPM and track info synced
+      const iv = setInterval(() => {
+        if (popup.closed) { clearInterval(iv); return; }
+        renderJogs();
+      }, 1000);
+
+      popup.addEventListener("beforeunload", () => {
+        clearInterval(iv);
+        root.unmount();
+        jogPopupRef.current = null;
+      });
+    });
+
+    toast.success("Jog Wheels popped out to new window — drag to your second screen!");
+  }, [mode, trackMeta, deckBpms]);
+
+  // Clean up jog popup on unmount
+  useEffect(() => {
+    return () => {
+      if (jogPopupRef.current && !jogPopupRef.current.closed) {
+        jogPopupRef.current.close();
+      }
+    };
+  }, []);
 
   // ── Song Requests (from listeners) ──
   const [songRequests, setSongRequests] = useState([]);
@@ -480,6 +561,7 @@ export default function Mixer({ mode = "classic", onBack }) {
         case "q":          setAutoQueue(prev => !prev); break;
         case "g":          setGestureMode(prev => !prev); break;
         case "l":          setLibraryOpen(prev => !prev); break;
+        case "j":          setShowJogWheels(prev => !prev); break;
         case "?":          setShowShortcuts(prev => !prev); break;
         default: break;
       }
@@ -957,6 +1039,19 @@ export default function Mixer({ mode = "classic", onBack }) {
             🎹 Sampler
           </button>
           <button
+            className={`deck-btn ${showJogWheels ? "active" : ""}`}
+            onClick={() => setShowJogWheels(!showJogWheels)}
+          >
+            💿 Jog Wheels
+          </button>
+          <button
+            className="deck-btn"
+            onClick={popOutJogWheels}
+            title="Pop out jog wheels for multi-screen"
+          >
+            🖥️ Pop Out Jogs
+          </button>
+          <button
             className={`deck-btn ${showRequests ? "active" : ""}`}
             onClick={() => setShowRequests(!showRequests)}
           >
@@ -1057,6 +1152,21 @@ export default function Mixer({ mode = "classic", onBack }) {
       {/* ═══ Sampler Pad ═══ */}
       {showSampler && <SamplerPad />}
 
+      {/* ═══ Inline Jog Wheels ═══ */}
+      {showJogWheels && (
+        <div className="jw-inline-row" data-panel="jogwheels-panel">
+          {(mode === "pro" ? ["A", "B", "C", "D"] : ["A", "B"]).map(d => (
+            <JogWheel
+              key={d}
+              deckName={d}
+              bpm={deckBpms[d] || 120}
+              trackTitle={trackMeta[d]?.title || ""}
+              trackArtist={trackMeta[d]?.artist || ""}
+            />
+          ))}
+        </div>
+      )}
+
       {/* ═══ Song Requests Panel ═══ */}
       {showRequests && (
         <div className="song-requests-panel">
@@ -1113,6 +1223,7 @@ export default function Mixer({ mode = "classic", onBack }) {
               <span className="shortcut-key">Q</span><span>Toggle Auto-Queue</span>
               <span className="shortcut-key">G</span><span>Toggle Gesture Mode</span>
               <span className="shortcut-key">L</span><span>Toggle Music Library</span>
+              <span className="shortcut-key">J</span><span>Toggle Jog Wheels</span>
               <span className="shortcut-key">?</span><span>Show/hide this help</span>
               <span className="shortcut-key">F</span><span>Toggle fullscreen</span>
             </div>

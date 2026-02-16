@@ -4676,3 +4676,346 @@ body {
   cursor: pointer; font-size: 0.8rem; transition: all 0.2s;
 }
 .btn-danger-sm:hover { background: rgba(255,50,50,0.25); }
+
+/* ═══════════════════════════════════════════════════════════════
+   JOG WHEEL — Pop-out multi-screen controller
+   ═══════════════════════════════════════════════════════════════ */
+
+.jogwheel {
+  background: #0a0a14;
+  border: 1px solid #1e1e30;
+  border-radius: 12px;
+  padding: 14px;
+  width: 320px;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Header */
+.jw-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #1e1e30;
+}
+.jw-deck-label {
+  font-weight: 700;
+  font-size: 0.85rem;
+  font-family: monospace;
+  letter-spacing: 1px;
+}
+.jw-track-info {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.jw-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jw-artist {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jw-bpm-badge {
+  background: #181828;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  font-family: monospace;
+  color: #ffdd00;
+  white-space: nowrap;
+}
+
+/* Position / Needle Drop Bar */
+.jw-position-bar {
+  position: relative;
+  height: 10px;
+  background: #111;
+  border-radius: 5px;
+  cursor: pointer;
+  overflow: visible;
+}
+.jw-position-bar:hover { background: #1a1a2a; }
+.jw-position-fill {
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #00f0ff55, #ff00ff55);
+  transition: width 0.15s linear;
+}
+.jw-cue-marker {
+  position: absolute;
+  top: -2px;
+  width: 3px;
+  height: 14px;
+  border-radius: 1px;
+  pointer-events: none;
+}
+.jw-loop-region {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(0, 240, 255, 0.2);
+  border-left: 2px solid #00f0ff;
+  border-right: 2px solid #00f0ff;
+  pointer-events: none;
+}
+
+/* Time Row */
+.jw-time-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+.jw-time {
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #ccc;
+}
+.jw-time.remaining { color: #ff9800; }
+
+/* Mode Row */
+.jw-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.jw-mode-btn {
+  background: #12121e;
+  border: 1px solid #2a2a3e;
+  color: #888;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+.jw-mode-btn:hover { border-color: #555; color: #ccc; }
+.jw-mode-btn.active {
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.08);
+}
+.jw-sensitivity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: #888;
+}
+.jw-sensitivity input[type="range"] {
+  width: 60px;
+  height: 3px;
+  accent-color: var(--neon-cyan);
+}
+
+/* Platter Container */
+.jw-platter-container {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 4px 0;
+}
+.jw-platter {
+  cursor: grab;
+  border-radius: 50%;
+  transition: filter 0.2s;
+}
+.jw-platter:active { cursor: grabbing; }
+.jw-platter.braking { filter: brightness(0.6); }
+.jw-bend-display {
+  position: absolute;
+  bottom: 8px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #00f0ff;
+  font-family: monospace;
+  font-size: 0.85rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #00f0ff44;
+}
+
+/* Transport Buttons */
+.jw-transport {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.jw-btn {
+  background: #12121e;
+  border: 1px solid #2a2a3e;
+  color: #ccc;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  transition: all 0.15s;
+}
+.jw-btn:hover { border-color: #555; background: #1a1a2e; }
+.jw-btn.active {
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.1);
+}
+.jw-btn.play {
+  min-width: 48px;
+  font-size: 1.1rem;
+  padding: 6px 14px;
+}
+.jw-btn.play.active {
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+  background: rgba(57, 255, 20, 0.1);
+}
+
+/* Section Labels */
+.jw-section-label {
+  font-size: 0.65rem;
+  letter-spacing: 2px;
+  color: #555;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding-top: 2px;
+}
+
+/* Hot Cue Grid */
+.jw-hotcue-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.jw-hotcue-pad-container {
+  position: relative;
+}
+.jw-hotcue-pad {
+  width: 100%;
+  aspect-ratio: 1.6;
+  background: #111;
+  border: 2px solid #333;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s;
+}
+.jw-hotcue-pad:hover { background: #1a1a28; }
+.jw-hotcue-pad.set {
+  background: rgba(0, 0, 0, 0.5);
+  text-shadow: 0 0 8px currentColor;
+}
+.jw-hotcue-clear {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ff3366;
+  color: #fff;
+  border: none;
+  font-size: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.jw-hotcue-pad-container:hover .jw-hotcue-clear { opacity: 1; }
+
+/* Loop Row */
+.jw-loop-row {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.jw-loop-btn {
+  background: #111;
+  border: 1px solid #2a2a3e;
+  color: #888;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: monospace;
+  transition: all 0.12s;
+  min-width: 28px;
+  text-align: center;
+}
+.jw-loop-btn:hover { border-color: #555; color: #ccc; }
+.jw-loop-btn.active {
+  border-color: #00f0ff;
+  color: #00f0ff;
+  background: rgba(0, 240, 255, 0.1);
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.2);
+}
+.jw-loop-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* Status Badges */
+.jw-status-row {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 20px;
+}
+.jw-status-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-family: monospace;
+}
+.jw-status-badge.slip   { background: rgba(255, 152, 0, 0.15); color: #ff9800; border: 1px solid #ff980044; }
+.jw-status-badge.reverse { background: rgba(255, 0, 255, 0.15); color: #ff00ff; border: 1px solid #ff00ff44; }
+.jw-status-badge.loop   { background: rgba(0, 240, 255, 0.15); color: #00f0ff; border: 1px solid #00f0ff44; }
+.jw-status-badge.brake  { background: rgba(255, 51, 102, 0.15); color: #ff3366; border: 1px solid #ff336644; }
+
+/* ── Jog Wheel Popup Container (used in window.open) ── */
+.jogwheel-popup {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+  background: #06080f;
+  min-height: 100vh;
+}
+
+/* ── Jog Wheel toggle buttons in Mixer ── */
+.jw-toggle-bar {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  padding: 8px 0;
+}
+.jw-inline-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
